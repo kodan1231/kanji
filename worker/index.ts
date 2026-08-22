@@ -49,6 +49,23 @@ async function hashPassword(password: string): Promise<string> {
   return `${bufferToHex(salt)}:${bufferToHex(hash)}`;
 }
 
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [saltHex, hashHex] = stored.split(":");
+  const salt = hexToBuffer(saltHex);
+  const hash = await pbkdf2(password, salt);
+  return bufferToHex(hash) === hashHex;
+}
+
+function parseCookies(request: Request): Record<string, string> {
+  const header = request.headers.get("Cookie") || "";
+  const cookies: Record<string, string> = {};
+  header.split(";").forEach((pair) => {
+    const [k, v] = pair.trim().split("=");
+    if (k) cookies[k] = decodeURIComponent(v || "");
+  });
+  return cookies;
+}
+
 async function getSessionUser(
   request: Request,
   env: Env
@@ -67,23 +84,6 @@ async function getSessionUser(
     .first<{ id: number; username: string }>();
 
   return session || null;
-}
-
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [saltHex, hashHex] = stored.split(":");
-  const salt = hexToBuffer(saltHex);
-  const hash = await pbkdf2(password, salt);
-  return bufferToHex(hash) === hashHex;
-}
-
-function parseCookies(request: Request): Record<string, string> {
-  const header = request.headers.get("Cookie") || "";
-  const cookies: Record<string, string> = {};
-  header.split(";").forEach((pair) => {
-    const [k, v] = pair.trim().split("=");
-    if (k) cookies[k] = decodeURIComponent(v || "");
-  });
-  return cookies;
 }
 
 function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
@@ -186,7 +186,7 @@ export default {
       const expiresAt = new Date(Date.now() + SESSION_DURATION_SECONDS * 1000).toISOString();
       await env.DB.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").bind(token, user.id, expiresAt).run();
 
-      const headers = new Headers({ "Content-Type": "application/json" });
+      const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
       headers.append(
         "Set-Cookie",
         `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DURATION_SECONDS}`
@@ -200,104 +200,104 @@ export default {
       if (token) {
         await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
       }
-      const headers = new Headers({ "Content-Type": "application/json" });
+      const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
       headers.append("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
       return new Response(JSON.stringify({ status: "ok" }), { headers });
     }
 
-	if (url.pathname === "/api/auth/me") {
-	const user = await getSessionUser(request, env);
-	return jsonResponse({ user });
-	}
-
-	if (url.pathname === "/api/questions/answer" && method === "POST") {
-	const user = await getSessionUser(request, env);
-	if (!user) {
-		return jsonResponse({ error: "login required" }, { status: 401 });
-	}
-
-  if (url.pathname === "/api/questions/stats") {
-    const idsParam = url.searchParams.get("ids");
-    if (!idsParam) {
-      return jsonResponse({ error: "ids is required" }, { status: 400 });
-    }
-    const ids = idsParam
-      .split(",")
-      .map((s) => Number(s.trim()))
-      .filter((n) => !isNaN(n));
-    if (ids.length === 0) {
-      return jsonResponse({ error: "invalid ids" }, { status: 400 });
+    if (url.pathname === "/api/auth/me") {
+      const user = await getSessionUser(request, env);
+      return jsonResponse({ user });
     }
 
-    const user = await getSessionUser(request, env);
-    const placeholders = ids.map(() => "?").join(",");
+    if (url.pathname === "/api/questions/answer" && method === "POST") {
+      const user = await getSessionUser(request, env);
+      if (!user) {
+        return jsonResponse({ error: "login required" }, { status: 401 });
+      }
 
-    const overallRows = await env.DB
-      .prepare(
-        `SELECT question_id, AVG(is_correct) AS accuracy, COUNT(*) AS attempts
-        FROM attempts
-        WHERE question_id IN (${placeholders})
-        GROUP BY question_id`
-      )
-      .bind(...ids)
-      .all<{ question_id: number; accuracy: number; attempts: number }>();
+      const body = await request.json<{ questionId?: number; answer?: string }>();
+      const { questionId, answer } = body;
+      if (!questionId || answer === undefined) {
+        return jsonResponse({ error: "questionId and answer are required" }, { status: 400 });
+      }
 
-    const overallMap = new Map(
-      overallRows.results.map((r) => [r.question_id, r])
-    );
+      const question = await env.DB
+        .prepare("SELECT correct_answer FROM questions WHERE id = ?")
+        .bind(questionId)
+        .first<{ correct_answer: string }>();
 
-    let userMap = new Map<number, { accuracy: number; attempts: number }>();
-    if (user) {
-      const userRows = await env.DB
+      if (!question) {
+        return jsonResponse({ error: "question not found" }, { status: 404 });
+      }
+
+      const isCorrect = question.correct_answer === answer;
+
+      await env.DB
+        .prepare("INSERT INTO attempts (user_id, question_id, is_correct) VALUES (?, ?, ?)")
+        .bind(user.id, questionId, isCorrect ? 1 : 0)
+        .run();
+
+      return jsonResponse({
+        correct: isCorrect,
+        correctAnswer: question.correct_answer,
+      });
+    }
+
+    if (url.pathname === "/api/questions/stats") {
+      const idsParam = url.searchParams.get("ids");
+      if (!idsParam) {
+        return jsonResponse({ error: "ids is required" }, { status: 400 });
+      }
+      const ids = idsParam
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => !isNaN(n));
+      if (ids.length === 0) {
+        return jsonResponse({ error: "invalid ids" }, { status: 400 });
+      }
+
+      const user = await getSessionUser(request, env);
+      const placeholders = ids.map(() => "?").join(",");
+
+      const overallRows = await env.DB
         .prepare(
           `SELECT question_id, AVG(is_correct) AS accuracy, COUNT(*) AS attempts
-          FROM attempts
-          WHERE user_id = ? AND question_id IN (${placeholders})
-          GROUP BY question_id`
+           FROM attempts
+           WHERE question_id IN (${placeholders})
+           GROUP BY question_id`
         )
-        .bind(user.id, ...ids)
+        .bind(...ids)
         .all<{ question_id: number; accuracy: number; attempts: number }>();
-      userMap = new Map(userRows.results.map((r) => [r.question_id, r]));
+
+      const overallMap = new Map(
+        overallRows.results.map((r) => [r.question_id, r])
+      );
+
+      let userMap = new Map<number, { accuracy: number; attempts: number }>();
+      if (user) {
+        const userRows = await env.DB
+          .prepare(
+            `SELECT question_id, AVG(is_correct) AS accuracy, COUNT(*) AS attempts
+             FROM attempts
+             WHERE user_id = ? AND question_id IN (${placeholders})
+             GROUP BY question_id`
+          )
+          .bind(user.id, ...ids)
+          .all<{ question_id: number; accuracy: number; attempts: number }>();
+        userMap = new Map(userRows.results.map((r) => [r.question_id, r]));
+      }
+
+      const stats = ids.map((id) => ({
+        questionId: id,
+        overallAccuracy: overallMap.get(id)?.accuracy ?? null,
+        overallAttempts: overallMap.get(id)?.attempts ?? 0,
+        userAccuracy: userMap.get(id)?.accuracy ?? null,
+        userAttempts: userMap.get(id)?.attempts ?? 0,
+      }));
+
+      return jsonResponse({ stats });
     }
-
-    const stats = ids.map((id) => ({
-      questionId: id,
-      overallAccuracy: overallMap.get(id)?.accuracy ?? null,
-      overallAttempts: overallMap.get(id)?.attempts ?? 0,
-      userAccuracy: userMap.get(id)?.accuracy ?? null,
-      userAttempts: userMap.get(id)?.attempts ?? 0,
-    }));
-
-    return jsonResponse({ stats });
-  }
-
-	const body = await request.json<{ questionId?: number; answer?: string }>();
-	const { questionId, answer } = body;
-	if (!questionId || answer === undefined) {
-		return jsonResponse({ error: "questionId and answer are required" }, { status: 400 });
-	}
-
-	const question = await env.DB
-		.prepare("SELECT correct_answer FROM questions WHERE id = ?")
-		.bind(questionId)
-		.first<{ correct_answer: string }>();
-
-	if (!question) {
-		return jsonResponse({ error: "question not found" }, { status: 404 });
-	}
-
-	const isCorrect = question.correct_answer === answer;
-
-	await env.DB
-		.prepare("INSERT INTO attempts (user_id, question_id, is_correct) VALUES (?, ?, ?)")
-		.bind(user.id, questionId, isCorrect ? 1 : 0)
-		.run();
-
-	return jsonResponse({
-		correct: isCorrect,
-		correctAnswer: question.correct_answer,
-	});
-	}	
 
     if (url.pathname.startsWith("/api/")) {
       return jsonResponse({ error: "Not Found" }, { status: 404 });
