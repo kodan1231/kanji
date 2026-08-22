@@ -216,6 +216,61 @@ export default {
 		return jsonResponse({ error: "login required" }, { status: 401 });
 	}
 
+  if (url.pathname === "/api/questions/stats") {
+    const idsParam = url.searchParams.get("ids");
+    if (!idsParam) {
+      return jsonResponse({ error: "ids is required" }, { status: 400 });
+    }
+    const ids = idsParam
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => !isNaN(n));
+    if (ids.length === 0) {
+      return jsonResponse({ error: "invalid ids" }, { status: 400 });
+    }
+
+    const user = await getSessionUser(request, env);
+    const placeholders = ids.map(() => "?").join(",");
+
+    const overallRows = await env.DB
+      .prepare(
+        `SELECT question_id, AVG(is_correct) AS accuracy, COUNT(*) AS attempts
+        FROM attempts
+        WHERE question_id IN (${placeholders})
+        GROUP BY question_id`
+      )
+      .bind(...ids)
+      .all<{ question_id: number; accuracy: number; attempts: number }>();
+
+    const overallMap = new Map(
+      overallRows.results.map((r) => [r.question_id, r])
+    );
+
+    let userMap = new Map<number, { accuracy: number; attempts: number }>();
+    if (user) {
+      const userRows = await env.DB
+        .prepare(
+          `SELECT question_id, AVG(is_correct) AS accuracy, COUNT(*) AS attempts
+          FROM attempts
+          WHERE user_id = ? AND question_id IN (${placeholders})
+          GROUP BY question_id`
+        )
+        .bind(user.id, ...ids)
+        .all<{ question_id: number; accuracy: number; attempts: number }>();
+      userMap = new Map(userRows.results.map((r) => [r.question_id, r]));
+    }
+
+    const stats = ids.map((id) => ({
+      questionId: id,
+      overallAccuracy: overallMap.get(id)?.accuracy ?? null,
+      overallAttempts: overallMap.get(id)?.attempts ?? 0,
+      userAccuracy: userMap.get(id)?.accuracy ?? null,
+      userAttempts: userMap.get(id)?.attempts ?? 0,
+    }));
+
+    return jsonResponse({ stats });
+  }
+
 	const body = await request.json<{ questionId?: number; answer?: string }>();
 	const { questionId, answer } = body;
 	if (!questionId || answer === undefined) {
