@@ -112,6 +112,8 @@ function renderHome(): string {
       <label for="level-select">レベル</label>
       <select id="level-select">
         <option value="10">10級（小学1年相当）</option>
+        <option value="9">9級（小学2年相当）</option>
+        <option value="8">8級（小学3年相当）</option>
       </select>
       <div class="home-actions">
         <button id="challenge-btn" class="primary-btn">チャレンジコースへ</button>
@@ -346,6 +348,8 @@ async function renderStudy(level: string, q: string): Promise<string> {
         <label>級
           <select id="study-level">
             <option value="10" ${level === "10" ? "selected" : ""}>10級</option>
+            <option value="9" ${level === "9" ? "selected" : ""}>9級</option>
+            <option value="8" ${level === "8" ? "selected" : ""}>8級</option>
           </select>
         </label>
         <label>検索
