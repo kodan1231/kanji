@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck:worker": "tsc -p tsconfig.worker.json"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260822.1",
