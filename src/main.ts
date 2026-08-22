@@ -1,6 +1,7 @@
 import "./style.css";
 
 type User = { id: number; username: string } | null;
+type AnswerMode = "choice" | "input";
 
 interface ChallengeQuestion {
   id: number;
@@ -115,6 +116,11 @@ function renderHome(): string {
         <option value="9">9級（小学2年相当）</option>
         <option value="8">8級（小学3年相当）</option>
       </select>
+      <label for="mode-select">チャレンジの回答形式</label>
+      <select id="mode-select">
+        <option value="choice">4択で選ぶ</option>
+        <option value="input">文字を入力する</option>
+      </select>
       <div class="home-actions">
         <button id="challenge-btn" class="primary-btn">チャレンジコースへ</button>
         <button id="study-btn">スタディコースへ</button>
@@ -124,12 +130,13 @@ function renderHome(): string {
 }
 
 function attachHomeEvents(): void {
-  const select = document.querySelector<HTMLSelectElement>("#level-select")!;
+  const levelSelect = document.querySelector<HTMLSelectElement>("#level-select")!;
+  const modeSelect = document.querySelector<HTMLSelectElement>("#mode-select")!;
   document.querySelector("#challenge-btn")?.addEventListener("click", () => {
-    navigate(`/challenge?level=${select.value}`);
+    navigate(`/challenge?level=${levelSelect.value}&mode=${modeSelect.value}`);
   });
   document.querySelector("#study-btn")?.addEventListener("click", () => {
-    navigate(`/study?level=${select.value}`);
+    navigate(`/study?level=${levelSelect.value}`);
   });
 }
 
@@ -204,7 +211,7 @@ function attachLoginEvents(): void {
 
 // ---------- チャレンジコース ----------
 
-async function renderChallenge(level: string): Promise<string> {
+async function renderChallenge(level: string, mode: AnswerMode): Promise<string> {
   if (!currentUser) {
     return `
       ${renderHeader()}
@@ -240,12 +247,19 @@ async function renderChallenge(level: string): Promise<string> {
   }
 
   const q = challengeQuestions[challengeIndex];
-  const choicesHtml = (q.choices || [])
-    .map(
-      (c) =>
-        `<label class="choice"><input type="radio" name="choice" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
-    )
-    .join("");
+
+  const answerAreaHtml =
+    mode === "input"
+      ? `
+        <label for="answer-input">読み方をひらがなで入力してください</label>
+        <input type="text" id="answer-input" autocomplete="off" autofocus />
+      `
+      : (q.choices || [])
+          .map(
+            (c) =>
+              `<label class="choice"><input type="radio" name="choice" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
+          )
+          .join("");
 
   return `
     ${renderHeader()}
@@ -254,7 +268,7 @@ async function renderChallenge(level: string): Promise<string> {
       <p class="progress">問題 ${challengeIndex + 1} / ${challengeQuestions.length}（正解 ${challengeScore}問）</p>
       <p class="prompt">${escapeHtml(q.prompt)}</p>
       <form id="challenge-form">
-        ${choicesHtml}
+        ${answerAreaHtml}
         <button type="submit">回答する</button>
       </form>
       <p id="challenge-feedback" class="message"></p>
@@ -262,13 +276,14 @@ async function renderChallenge(level: string): Promise<string> {
   `;
 }
 
-function attachChallengeEvents(): void {
+function attachChallengeEvents(level: string, mode: AnswerMode): void {
   if (!currentUser) return;
 
   if (challengeIndex >= challengeQuestions.length) {
     document.querySelector("#retry-btn")?.addEventListener("click", () => {
       challengeQuestions = [];
       lastChallengeLevel = null;
+      navigate(`/challenge?level=${level}&mode=${mode}`);
       render();
     });
     return;
@@ -279,10 +294,22 @@ function attachChallengeEvents(): void {
 
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const selected = form.querySelector<HTMLInputElement>('input[name="choice"]:checked');
-    if (!selected) {
-      feedback.textContent = "選択肢を選んでください。";
-      return;
+
+    let answer: string | null = null;
+    if (mode === "input") {
+      const input = document.querySelector<HTMLInputElement>("#answer-input");
+      answer = input?.value.trim() || null;
+      if (!answer) {
+        feedback.textContent = "読み方を入力してください。";
+        return;
+      }
+    } else {
+      const selected = form.querySelector<HTMLInputElement>('input[name="choice"]:checked');
+      if (!selected) {
+        feedback.textContent = "選択肢を選んでください。";
+        return;
+      }
+      answer = selected.value;
     }
 
     const submitBtn = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
@@ -292,7 +319,7 @@ function attachChallengeEvents(): void {
     try {
       const result = await apiFetch("/api/questions/answer", {
         method: "POST",
-        body: JSON.stringify({ questionId: q.id, answer: selected.value }),
+        body: JSON.stringify({ questionId: q.id, answer }),
       });
 
       feedback.classList.remove("correct", "incorrect");
@@ -392,9 +419,10 @@ async function render(): Promise<void> {
 
   if (path === "/challenge") {
     const level = params.get("level") || "10";
-    app.innerHTML = await renderChallenge(level);
+    const mode: AnswerMode = params.get("mode") === "input" ? "input" : "choice";
+    app.innerHTML = await renderChallenge(level, mode);
     attachHeaderEvents();
-    attachChallengeEvents();
+    attachChallengeEvents(level, mode);
     return;
   }
 
