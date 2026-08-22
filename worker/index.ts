@@ -51,6 +51,35 @@ export default {
       return Response.json({ questions });
     }
 
+	if (url.pathname === "/api/kanji/study") {
+		const level = url.searchParams.get("level");
+		const q = url.searchParams.get("q");
+
+		let query =
+			"SELECT id, character, level, reading_on, reading_kun, radical, stroke_count, meaning FROM kanji WHERE 1=1";
+		const params: (string | number)[] = [];
+
+		if (level) {
+			query += " AND level = ?";
+			params.push(Number(level));
+		}
+
+		if (q) {
+			query += " AND (character LIKE ? OR reading_on LIKE ? OR reading_kun LIKE ?)";
+			const like = `%${q}%`;
+			params.push(like, like, like);
+		}
+
+		query += " ORDER BY id";
+
+		const { results } = await env.DB
+			.prepare(query)
+			.bind(...params)
+			.all();
+
+		return Response.json({ kanji: results });
+	}
+	
     if (url.pathname.startsWith("/api/")) {
       return Response.json({ error: "Not Found" }, { status: 404 });
     }
