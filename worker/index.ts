@@ -86,6 +86,12 @@ function parseCookies(request: Request): Record<string, string> {
   return cookies;
 }
 
+function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "application/json; charset=utf-8");
+  return new Response(JSON.stringify(data), { ...init, headers });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -95,13 +101,13 @@ export default {
       const result = await env.DB
         .prepare("SELECT character, reading_on, reading_kun FROM kanji LIMIT 1")
         .first();
-      return Response.json({ status: "ok", sample: result });
+      return jsonResponse({ status: "ok", sample: result });
     }
 
     if (url.pathname === "/api/questions/challenge") {
       const level = url.searchParams.get("level");
       if (!level) {
-        return Response.json({ error: "level is required" }, { status: 400 });
+        return jsonResponse({ error: "level is required" }, { status: 400 });
       }
       const { results } = await env.DB
         .prepare(
@@ -122,7 +128,7 @@ export default {
         prompt: row.prompt,
         choices: row.choices ? JSON.parse(row.choices) : null,
       }));
-      return Response.json({ questions });
+      return jsonResponse({ questions });
     }
 
     if (url.pathname === "/api/kanji/study") {
@@ -142,39 +148,39 @@ export default {
       }
       query += " ORDER BY id";
       const { results } = await env.DB.prepare(query).bind(...params).all();
-      return Response.json({ kanji: results });
+      return jsonResponse({ kanji: results });
     }
 
     if (url.pathname === "/api/auth/register" && method === "POST") {
       const body = await request.json<{ username?: string; password?: string }>();
       const { username, password } = body;
       if (!username || !password) {
-        return Response.json({ error: "username and password are required" }, { status: 400 });
+        return jsonResponse({ error: "username and password are required" }, { status: 400 });
       }
       if (password.length < 8) {
-        return Response.json({ error: "password must be at least 8 characters" }, { status: 400 });
+        return jsonResponse({ error: "password must be at least 8 characters" }, { status: 400 });
       }
       const existing = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(username).first();
       if (existing) {
-        return Response.json({ error: "username already taken" }, { status: 409 });
+        return jsonResponse({ error: "username already taken" }, { status: 409 });
       }
       const passwordHash = await hashPassword(password);
       await env.DB.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)").bind(username, passwordHash).run();
-      return Response.json({ status: "ok" }, { status: 201 });
+      return jsonResponse({ status: "ok" }, { status: 201 });
     }
 
     if (url.pathname === "/api/auth/login" && method === "POST") {
       const body = await request.json<{ username?: string; password?: string }>();
       const { username, password } = body;
       if (!username || !password) {
-        return Response.json({ error: "username and password are required" }, { status: 400 });
+        return jsonResponse({ error: "username and password are required" }, { status: 400 });
       }
       const user = await env.DB
         .prepare("SELECT id, password_hash FROM users WHERE username = ?")
         .bind(username)
         .first<{ id: number; password_hash: string }>();
       if (!user || !(await verifyPassword(password, user.password_hash))) {
-        return Response.json({ error: "invalid username or password" }, { status: 401 });
+        return jsonResponse({ error: "invalid username or password" }, { status: 401 });
       }
       const token = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + SESSION_DURATION_SECONDS * 1000).toISOString();
@@ -201,19 +207,19 @@ export default {
 
 	if (url.pathname === "/api/auth/me") {
 	const user = await getSessionUser(request, env);
-	return Response.json({ user });
+	return jsonResponse({ user });
 	}
 
 	if (url.pathname === "/api/questions/answer" && method === "POST") {
 	const user = await getSessionUser(request, env);
 	if (!user) {
-		return Response.json({ error: "login required" }, { status: 401 });
+		return jsonResponse({ error: "login required" }, { status: 401 });
 	}
 
 	const body = await request.json<{ questionId?: number; answer?: string }>();
 	const { questionId, answer } = body;
 	if (!questionId || answer === undefined) {
-		return Response.json({ error: "questionId and answer are required" }, { status: 400 });
+		return jsonResponse({ error: "questionId and answer are required" }, { status: 400 });
 	}
 
 	const question = await env.DB
@@ -222,7 +228,7 @@ export default {
 		.first<{ correct_answer: string }>();
 
 	if (!question) {
-		return Response.json({ error: "question not found" }, { status: 404 });
+		return jsonResponse({ error: "question not found" }, { status: 404 });
 	}
 
 	const isCorrect = question.correct_answer === answer;
@@ -232,14 +238,14 @@ export default {
 		.bind(user.id, questionId, isCorrect ? 1 : 0)
 		.run();
 
-	return Response.json({
+	return jsonResponse({
 		correct: isCorrect,
 		correctAnswer: question.correct_answer,
 	});
 	}	
 
     if (url.pathname.startsWith("/api/")) {
-      return Response.json({ error: "Not Found" }, { status: 404 });
+      return jsonResponse({ error: "Not Found" }, { status: 404 });
     }
 
     return env.ASSETS.fetch(request);
