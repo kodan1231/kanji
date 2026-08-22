@@ -49,6 +49,26 @@ async function hashPassword(password: string): Promise<string> {
   return `${bufferToHex(salt)}:${bufferToHex(hash)}`;
 }
 
+async function getSessionUser(
+  request: Request,
+  env: Env
+): Promise<{ id: number; username: string } | null> {
+  const cookies = parseCookies(request);
+  const token = cookies[SESSION_COOKIE];
+  if (!token) return null;
+
+  const session = await env.DB
+    .prepare(
+      `SELECT u.id, u.username FROM sessions s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.token = ? AND s.expires_at > datetime('now')`
+    )
+    .bind(token)
+    .first<{ id: number; username: string }>();
+
+  return session || null;
+}
+
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(":");
   const salt = hexToBuffer(saltHex);
@@ -179,22 +199,44 @@ export default {
       return new Response(JSON.stringify({ status: "ok" }), { headers });
     }
 
-    if (url.pathname === "/api/auth/me") {
-      const cookies = parseCookies(request);
-      const token = cookies[SESSION_COOKIE];
-      if (!token) {
-        return Response.json({ user: null });
-      }
-      const session = await env.DB
-        .prepare(
-          `SELECT u.id, u.username FROM sessions s
-           JOIN users u ON s.user_id = u.id
-           WHERE s.token = ? AND s.expires_at > datetime('now')`
-        )
-        .bind(token)
-        .first<{ id: number; username: string }>();
-      return Response.json({ user: session || null });
-    }
+	if (url.pathname === "/api/auth/me") {
+	const user = await getSessionUser(request, env);
+	return Response.json({ user });
+	}
+
+	if (url.pathname === "/api/questions/answer" && method === "POST") {
+	const user = await getSessionUser(request, env);
+	if (!user) {
+		return Response.json({ error: "login required" }, { status: 401 });
+	}
+
+	const body = await request.json<{ questionId?: number; answer?: string }>();
+	const { questionId, answer } = body;
+	if (!questionId || answer === undefined) {
+		return Response.json({ error: "questionId and answer are required" }, { status: 400 });
+	}
+
+	const question = await env.DB
+		.prepare("SELECT correct_answer FROM questions WHERE id = ?")
+		.bind(questionId)
+		.first<{ correct_answer: string }>();
+
+	if (!question) {
+		return Response.json({ error: "question not found" }, { status: 404 });
+	}
+
+	const isCorrect = question.correct_answer === answer;
+
+	await env.DB
+		.prepare("INSERT INTO attempts (user_id, question_id, is_correct) VALUES (?, ?, ?)")
+		.bind(user.id, questionId, isCorrect ? 1 : 0)
+		.run();
+
+	return Response.json({
+		correct: isCorrect,
+		correctAnswer: question.correct_answer,
+	});
+	}	
 
     if (url.pathname.startsWith("/api/")) {
       return Response.json({ error: "Not Found" }, { status: 404 });
