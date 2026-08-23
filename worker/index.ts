@@ -223,15 +223,19 @@ export default {
       }
 
       const question = await env.DB
-        .prepare("SELECT correct_answer FROM questions WHERE id = ?")
+        .prepare("SELECT correct_answer, accepted_answers FROM questions WHERE id = ?")
         .bind(questionId)
-        .first<{ correct_answer: string }>();
+        .first<{ correct_answer: string; accepted_answers: string | null }>();
 
       if (!question) {
         return jsonResponse({ error: "question not found" }, { status: 404 });
       }
 
-      const isCorrect = question.correct_answer === answer;
+      const acceptedAnswers: string[] = question.accepted_answers
+        ? JSON.parse(question.accepted_answers)
+        : [question.correct_answer];
+
+      const isCorrect = acceptedAnswers.includes(answer.trim());
 
       await env.DB
         .prepare("INSERT INTO attempts (user_id, question_id, is_correct) VALUES (?, ?, ?)")
