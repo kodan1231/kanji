@@ -133,22 +133,27 @@ async function setKanjiTags(env: Env, kanjiId: number, tagIds: number[]): Promis
 async function getTagsForKanjiIds(env: Env, kanjiIds: number[]): Promise<Map<number, TagRef[]>> {
   const map = new Map<number, TagRef[]>();
   if (kanjiIds.length === 0) return map;
-  const placeholders = kanjiIds.map(() => "?").join(",");
-  const { results } = await env.DB
-    .prepare(
-      `SELECT kt.kanji_id AS kanji_id, t.id AS tag_id, t.name AS tag_name
-       FROM kanji_tags kt
-       JOIN tags t ON kt.tag_id = t.id
-       WHERE kt.kanji_id IN (${placeholders})
-       ORDER BY t.name`
-    )
-    .bind(...kanjiIds)
-    .all<{ kanji_id: number; tag_id: number; tag_name: string }>();
 
-  for (const row of results) {
-    const list = map.get(row.kanji_id) || [];
-    list.push({ id: row.tag_id, name: row.tag_name });
-    map.set(row.kanji_id, list);
+  const chunkSize = 50;
+  for (let i = 0; i < kanjiIds.length; i += chunkSize) {
+    const chunk = kanjiIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => "?").join(",");
+    const { results } = await env.DB
+      .prepare(
+        `SELECT kt.kanji_id AS kanji_id, t.id AS tag_id, t.name AS tag_name
+         FROM kanji_tags kt
+         JOIN tags t ON kt.tag_id = t.id
+         WHERE kt.kanji_id IN (${placeholders})
+         ORDER BY t.name`
+      )
+      .bind(...chunk)
+      .all<{ kanji_id: number; tag_id: number; tag_name: string }>();
+
+    for (const row of results) {
+      const list = map.get(row.kanji_id) || [];
+      list.push({ id: row.tag_id, name: row.tag_name });
+      map.set(row.kanji_id, list);
+    }
   }
   return map;
 }
