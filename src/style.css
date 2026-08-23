@@ -331,3 +331,87 @@ input[type="password"] {
     transition: none !important;
   }
 }
+
+/* 管理画面 */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.admin-tabs a {
+  display: inline-block;
+  padding: 8px 16px;
+  text-decoration: none;
+  color: var(--color-ink);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+
+.admin-tabs a.active {
+  background: #fff;
+  border-color: var(--color-line);
+  color: var(--color-indigo);
+  font-weight: 700;
+}
+
+.admin-table {
+  font-size: 0.85rem;
+  overflow-x: auto;
+  display: block;
+  white-space: nowrap;
+}
+
+.admin-table input {
+  width: 100%;
+  min-width: 60px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+}
+
+.admin-table td {
+  vertical-align: top;
+}
+
+.admin-table button {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  margin: 2px 2px 2px 0;
+  border: 1px solid var(--color-line);
+  background: #fff;
+  border-radius: 3px;
+}
+
+.admin-table .delete-kanji-btn,
+.admin-table .delete-question-btn {
+  color: var(--color-hanko);
+  border-color: var(--color-hanko);
+}
+
+.admin-new-form {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+  max-width: 480px;
+  margin-bottom: 24px;
+}
+
+.admin-new-form label {
+  margin-bottom: 0;
+}
+
+.admin-new-form input {
+  max-width: none;
+}
+
+h2 {
+  font-family: var(--font-display);
+  color: var(--color-indigo-dark);
+  font-size: 1.2rem;
+  margin: 32px 0 16px;
+}

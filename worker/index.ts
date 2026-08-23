@@ -11,6 +11,12 @@ interface QuestionRow {
   choices: string | null;
 }
 
+interface SessionUser {
+  id: number;
+  username: string;
+  isAdmin: boolean;
+}
+
 const SESSION_COOKIE = "session_token";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // 30日
 
@@ -66,24 +72,22 @@ function parseCookies(request: Request): Record<string, string> {
   return cookies;
 }
 
-async function getSessionUser(
-  request: Request,
-  env: Env
-): Promise<{ id: number; username: string } | null> {
+async function getSessionUser(request: Request, env: Env): Promise<SessionUser | null> {
   const cookies = parseCookies(request);
   const token = cookies[SESSION_COOKIE];
   if (!token) return null;
 
   const session = await env.DB
     .prepare(
-      `SELECT u.id, u.username FROM sessions s
+      `SELECT u.id, u.username, u.is_admin FROM sessions s
        JOIN users u ON s.user_id = u.id
        WHERE s.token = ? AND s.expires_at > datetime('now')`
     )
     .bind(token)
-    .first<{ id: number; username: string }>();
+    .first<{ id: number; username: string; is_admin: number }>();
 
-  return session || null;
+  if (!session) return null;
+  return { id: session.id, username: session.username, isAdmin: session.is_admin === 1 };
 }
 
 function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
@@ -92,19 +96,41 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
+interface AdminKanjiInput {
+  character?: string;
+  level?: number;
+  reading_on?: string | null;
+  reading_kun?: string | null;
+  radical?: string | null;
+  stroke_count?: number | null;
+  meaning?: string | null;
+}
+
+interface AdminQuestionInput {
+  kanjiId?: number;
+  type?: string;
+  prompt?: string;
+  correct_answer?: string;
+  choices?: string[] | null;
+  accepted_answers?: string[] | null;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method;
+    const pathname = url.pathname;
 
-    if (url.pathname === "/api/ping") {
+    // ---------- 公開API ----------
+
+    if (pathname === "/api/ping") {
       const result = await env.DB
         .prepare("SELECT character, reading_on, reading_kun FROM kanji LIMIT 1")
         .first();
       return jsonResponse({ status: "ok", sample: result });
     }
 
-    if (url.pathname === "/api/questions/challenge") {
+    if (pathname === "/api/questions/challenge") {
       const level = url.searchParams.get("level");
       if (!level) {
         return jsonResponse({ error: "level is required" }, { status: 400 });
@@ -131,7 +157,7 @@ export default {
       return jsonResponse({ questions });
     }
 
-    if (url.pathname === "/api/kanji/study") {
+    if (pathname === "/api/kanji/study") {
       const level = url.searchParams.get("level");
       const q = url.searchParams.get("q");
       let query =
@@ -151,7 +177,7 @@ export default {
       return jsonResponse({ kanji: results });
     }
 
-    if (url.pathname === "/api/auth/register" && method === "POST") {
+    if (pathname === "/api/auth/register" && method === "POST") {
       const body = await request.json<{ username?: string; password?: string }>();
       const { username, password } = body;
       if (!username || !password) {
@@ -169,7 +195,7 @@ export default {
       return jsonResponse({ status: "ok" }, { status: 201 });
     }
 
-    if (url.pathname === "/api/auth/login" && method === "POST") {
+    if (pathname === "/api/auth/login" && method === "POST") {
       const body = await request.json<{ username?: string; password?: string }>();
       const { username, password } = body;
       if (!username || !password) {
@@ -194,7 +220,7 @@ export default {
       return new Response(JSON.stringify({ status: "ok" }), { headers });
     }
 
-    if (url.pathname === "/api/auth/logout" && method === "POST") {
+    if (pathname === "/api/auth/logout" && method === "POST") {
       const cookies = parseCookies(request);
       const token = cookies[SESSION_COOKIE];
       if (token) {
@@ -205,12 +231,12 @@ export default {
       return new Response(JSON.stringify({ status: "ok" }), { headers });
     }
 
-    if (url.pathname === "/api/auth/me") {
+    if (pathname === "/api/auth/me") {
       const user = await getSessionUser(request, env);
       return jsonResponse({ user });
     }
 
-    if (url.pathname === "/api/questions/answer" && method === "POST") {
+    if (pathname === "/api/questions/answer" && method === "POST") {
       const user = await getSessionUser(request, env);
       if (!user) {
         return jsonResponse({ error: "login required" }, { status: 401 });
@@ -248,7 +274,7 @@ export default {
       });
     }
 
-    if (url.pathname === "/api/questions/stats") {
+    if (pathname === "/api/questions/stats") {
       const idsParam = url.searchParams.get("ids");
       if (!idsParam) {
         return jsonResponse({ error: "ids is required" }, { status: 400 });
@@ -274,9 +300,7 @@ export default {
         .bind(...ids)
         .all<{ question_id: number; accuracy: number; attempts: number }>();
 
-      const overallMap = new Map(
-        overallRows.results.map((r) => [r.question_id, r])
-      );
+      const overallMap = new Map(overallRows.results.map((r) => [r.question_id, r]));
 
       let userMap = new Map<number, { accuracy: number; attempts: number }>();
       if (user) {
@@ -303,7 +327,216 @@ export default {
       return jsonResponse({ stats });
     }
 
-    if (url.pathname.startsWith("/api/")) {
+    // ---------- 管理者専用API ----------
+
+    if (pathname.startsWith("/api/admin/")) {
+      const user = await getSessionUser(request, env);
+      if (!user) {
+        return jsonResponse({ error: "login required" }, { status: 401 });
+      }
+      if (!user.isAdmin) {
+        return jsonResponse({ error: "admin only" }, { status: 403 });
+      }
+
+      // ---- 漢字マスタ CRUD ----
+
+      if (pathname === "/api/admin/kanji" && method === "GET") {
+        const level = url.searchParams.get("level");
+        const q = url.searchParams.get("q");
+        let query =
+          "SELECT id, character, level, reading_on, reading_kun, radical, stroke_count, meaning FROM kanji WHERE 1=1";
+        const params: (string | number)[] = [];
+        if (level) {
+          query += " AND level = ?";
+          params.push(Number(level));
+        }
+        if (q) {
+          query += " AND (character LIKE ? OR reading_on LIKE ? OR reading_kun LIKE ?)";
+          const like = `%${q}%`;
+          params.push(like, like, like);
+        }
+        query += " ORDER BY level, id";
+        const { results } = await env.DB.prepare(query).bind(...params).all();
+        return jsonResponse({ kanji: results });
+      }
+
+      if (pathname === "/api/admin/kanji" && method === "POST") {
+        const body = await request.json<AdminKanjiInput>();
+        if (!body.character || !body.level) {
+          return jsonResponse({ error: "character and level are required" }, { status: 400 });
+        }
+        const result = await env.DB
+          .prepare(
+            `INSERT INTO kanji (character, level, reading_on, reading_kun, radical, stroke_count, meaning)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            body.character,
+            body.level,
+            body.reading_on ?? null,
+            body.reading_kun ?? null,
+            body.radical ?? null,
+            body.stroke_count ?? null,
+            body.meaning ?? null
+          )
+          .run();
+        return jsonResponse({ status: "ok", id: result.meta.last_row_id }, { status: 201 });
+      }
+
+      const kanjiIdMatch = pathname.match(/^\/api\/admin\/kanji\/(\d+)$/);
+      if (kanjiIdMatch) {
+        const kanjiId = Number(kanjiIdMatch[1]);
+
+        if (method === "PUT") {
+          const body = await request.json<AdminKanjiInput>();
+          if (!body.character || !body.level) {
+            return jsonResponse({ error: "character and level are required" }, { status: 400 });
+          }
+          await env.DB
+            .prepare(
+              `UPDATE kanji SET character = ?, level = ?, reading_on = ?, reading_kun = ?, radical = ?, stroke_count = ?, meaning = ?
+               WHERE id = ?`
+            )
+            .bind(
+              body.character,
+              body.level,
+              body.reading_on ?? null,
+              body.reading_kun ?? null,
+              body.radical ?? null,
+              body.stroke_count ?? null,
+              body.meaning ?? null,
+              kanjiId
+            )
+            .run();
+          return jsonResponse({ status: "ok" });
+        }
+
+        if (method === "DELETE") {
+          // 関連する問題・回答履歴も合わせて削除（外部キーの不整合を防ぐため）
+          await env.DB
+            .prepare(
+              `DELETE FROM attempts WHERE question_id IN (SELECT id FROM questions WHERE kanji_id = ?)`
+            )
+            .bind(kanjiId)
+            .run();
+          await env.DB.prepare("DELETE FROM questions WHERE kanji_id = ?").bind(kanjiId).run();
+          await env.DB.prepare("DELETE FROM kanji WHERE id = ?").bind(kanjiId).run();
+          return jsonResponse({ status: "ok" });
+        }
+      }
+
+      // ---- 問題 CRUD ----
+
+      if (pathname === "/api/admin/questions" && method === "GET") {
+        const level = url.searchParams.get("level");
+        const kanjiId = url.searchParams.get("kanjiId");
+        let query = `
+          SELECT q.id, q.kanji_id, k.character, k.level, q.type, q.prompt, q.correct_answer, q.choices, q.accepted_answers
+          FROM questions q
+          JOIN kanji k ON q.kanji_id = k.id
+          WHERE 1=1
+        `;
+        const params: (string | number)[] = [];
+        if (level) {
+          query += " AND k.level = ?";
+          params.push(Number(level));
+        }
+        if (kanjiId) {
+          query += " AND q.kanji_id = ?";
+          params.push(Number(kanjiId));
+        }
+        query += " ORDER BY k.level, k.id, q.id";
+        const { results } = await env.DB
+          .prepare(query)
+          .bind(...params)
+          .all<{
+            id: number;
+            kanji_id: number;
+            character: string;
+            level: number;
+            type: string;
+            prompt: string;
+            correct_answer: string;
+            choices: string | null;
+            accepted_answers: string | null;
+          }>();
+
+        const questions = results.map((row) => ({
+          id: row.id,
+          kanjiId: row.kanji_id,
+          character: row.character,
+          level: row.level,
+          type: row.type,
+          prompt: row.prompt,
+          correctAnswer: row.correct_answer,
+          choices: row.choices ? JSON.parse(row.choices) : null,
+          acceptedAnswers: row.accepted_answers ? JSON.parse(row.accepted_answers) : null,
+        }));
+        return jsonResponse({ questions });
+      }
+
+      if (pathname === "/api/admin/questions" && method === "POST") {
+        const body = await request.json<AdminQuestionInput>();
+        if (!body.kanjiId || !body.type || !body.prompt || !body.correct_answer) {
+          return jsonResponse(
+            { error: "kanjiId, type, prompt and correct_answer are required" },
+            { status: 400 }
+          );
+        }
+        const result = await env.DB
+          .prepare(
+            `INSERT INTO questions (kanji_id, type, prompt, correct_answer, choices, accepted_answers)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            body.kanjiId,
+            body.type,
+            body.prompt,
+            body.correct_answer,
+            body.choices ? JSON.stringify(body.choices) : null,
+            body.accepted_answers ? JSON.stringify(body.accepted_answers) : null
+          )
+          .run();
+        return jsonResponse({ status: "ok", id: result.meta.last_row_id }, { status: 201 });
+      }
+
+      const questionIdMatch = pathname.match(/^\/api\/admin\/questions\/(\d+)$/);
+      if (questionIdMatch) {
+        const questionId = Number(questionIdMatch[1]);
+
+        if (method === "PUT") {
+          const body = await request.json<AdminQuestionInput>();
+          if (!body.type || !body.prompt || !body.correct_answer) {
+            return jsonResponse({ error: "type, prompt and correct_answer are required" }, { status: 400 });
+          }
+          await env.DB
+            .prepare(
+              `UPDATE questions SET type = ?, prompt = ?, correct_answer = ?, choices = ?, accepted_answers = ?
+               WHERE id = ?`
+            )
+            .bind(
+              body.type,
+              body.prompt,
+              body.correct_answer,
+              body.choices ? JSON.stringify(body.choices) : null,
+              body.accepted_answers ? JSON.stringify(body.accepted_answers) : null,
+              questionId
+            )
+            .run();
+          return jsonResponse({ status: "ok" });
+        }
+
+        if (method === "DELETE") {
+          await env.DB.prepare("DELETE FROM attempts WHERE question_id = ?").bind(questionId).run();
+          await env.DB.prepare("DELETE FROM questions WHERE id = ?").bind(questionId).run();
+          return jsonResponse({ status: "ok" });
+        }
+      }
+
+      return jsonResponse({ error: "Not Found" }, { status: 404 });
+    }
+
+    if (pathname.startsWith("/api/")) {
       return jsonResponse({ error: "Not Found" }, { status: 404 });
     }
 

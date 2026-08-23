@@ -1,7 +1,8 @@
 import "./style.css";
 
-type User = { id: number; username: string } | null;
+type User = { id: number; username: string; isAdmin: boolean } | null;
 type AnswerMode = "choice" | "input";
+type AdminTab = "kanji" | "questions";
 
 interface ChallengeQuestion {
   id: number;
@@ -20,6 +21,18 @@ interface KanjiRow {
   radical: string | null;
   stroke_count: number | null;
   meaning: string | null;
+}
+
+interface AdminQuestionRow {
+  id: number;
+  kanjiId: number;
+  character: string;
+  level: number;
+  type: string;
+  prompt: string;
+  correctAnswer: string;
+  choices: string[] | null;
+  acceptedAnswers: string[] | null;
 }
 
 let currentUser: User = null;
@@ -76,11 +89,14 @@ function renderHeader(): string {
     ? `<span>${escapeHtml(currentUser.username)} さん</span> <button id="logout-btn">ログアウト</button>`
     : `<a href="#/login">ログイン / 登録</a>`;
 
+  const adminLink = currentUser?.isAdmin ? `<a href="#/admin">管理</a>` : "";
+
   return `
     <header class="app-header">
       <nav>
         <a href="#/">ホーム</a>
         <a href="#/study">スタディ</a>
+        ${adminLink}
       </nav>
       <div class="auth-status">${authArea}</div>
     </header>
@@ -405,6 +421,341 @@ function attachStudyEvents(): void {
   });
 }
 
+// ---------- 管理画面 ----------
+
+function levelFilterOptions(current: string): string {
+  const levels = ["", "10", "9", "8"];
+  const labels: Record<string, string> = { "": "すべて", "10": "10級", "9": "9級", "8": "8級" };
+  return levels
+    .map((lv) => `<option value="${lv}" ${current === lv ? "selected" : ""}>${labels[lv]}</option>`)
+    .join("");
+}
+
+async function renderAdmin(tab: AdminTab, level: string): Promise<string> {
+  if (!currentUser) {
+    return `
+      ${renderHeader()}
+      <main>
+        <h1>管理画面</h1>
+        <p>ログインが必要です。</p>
+        <a href="#/login">ログインする</a>
+      </main>
+    `;
+  }
+  if (!currentUser.isAdmin) {
+    return `
+      ${renderHeader()}
+      <main>
+        <h1>管理画面</h1>
+        <p>このページにアクセスする権限がありません。</p>
+      </main>
+    `;
+  }
+
+  const tabNav = `
+    <div class="admin-tabs">
+      <a href="#/admin?tab=kanji" class="${tab === "kanji" ? "active" : ""}">漢字マスタ</a>
+      <a href="#/admin?tab=questions" class="${tab === "questions" ? "active" : ""}">問題</a>
+    </div>
+  `;
+
+  if (tab === "questions") {
+    const params = new URLSearchParams();
+    if (level) params.set("level", level);
+    const data = await apiFetch(`/api/admin/questions?${params.toString()}`);
+    const questions: AdminQuestionRow[] = data.questions;
+
+    const rows = questions
+      .map(
+        (q) => `
+          <tr data-id="${q.id}">
+            <td>${q.id}</td>
+            <td>${escapeHtml(q.character)}（${q.level}級）</td>
+            <td><input class="f-type" value="${escapeHtml(q.type)}" style="width:6em" /></td>
+            <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" style="width:100%" /></td>
+            <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" style="width:6em" /></td>
+            <td><input class="f-choices" value="${escapeHtml((q.choices || []).join(","))}" placeholder="カンマ区切り" /></td>
+            <td><input class="f-accepted" value="${escapeHtml((q.acceptedAnswers || []).join(","))}" placeholder="カンマ区切り" /></td>
+            <td>
+              <button class="save-question-btn">保存</button>
+              <button class="delete-question-btn">削除</button>
+            </td>
+          </tr>
+        `
+      )
+      .join("");
+
+    return `
+      ${renderHeader()}
+      <main>
+        <h1>管理画面 — 問題</h1>
+        ${tabNav}
+        <form id="admin-filter-form" class="study-form">
+          <label>級
+            <select id="admin-level-filter">${levelFilterOptions(level)}</select>
+          </label>
+          <button type="submit">絞り込み</button>
+        </form>
+        <p>${questions.length}件</p>
+        <table class="kanji-table admin-table">
+          <thead>
+            <tr><th>ID</th><th>漢字</th><th>種別</th><th>問題文</th><th>正解</th><th>選択肢</th><th>許容する読み</th><th></th></tr>
+          </thead>
+          <tbody id="admin-question-rows">${rows}</tbody>
+        </table>
+
+        <h2>新規追加</h2>
+        <form id="admin-new-question-form" class="admin-new-form">
+          <label>漢字ID（漢字マスタ一覧のIDを指定）
+            <input type="number" id="new-q-kanji-id" required />
+          </label>
+          <label>種別（reading / writing / radical など）
+            <input type="text" id="new-q-type" value="reading" required />
+          </label>
+          <label>問題文
+            <input type="text" id="new-q-prompt" required />
+          </label>
+          <label>正解
+            <input type="text" id="new-q-correct" required />
+          </label>
+          <label>選択肢（カンマ区切り、任意）
+            <input type="text" id="new-q-choices" />
+          </label>
+          <label>許容する読み（カンマ区切り、任意）
+            <input type="text" id="new-q-accepted" />
+          </label>
+          <button type="submit" class="primary-btn">追加</button>
+        </form>
+        <p id="admin-message" class="message"></p>
+      </main>
+    `;
+  }
+
+  // tab === "kanji"
+  const params = new URLSearchParams();
+  if (level) params.set("level", level);
+  const data = await apiFetch(`/api/admin/kanji?${params.toString()}`);
+  const kanjiList: KanjiRow[] = data.kanji;
+
+  const rows = kanjiList
+    .map(
+      (k) => `
+        <tr data-id="${k.id}">
+          <td>${k.id}</td>
+          <td><input class="f-character" value="${escapeHtml(k.character)}" style="width:3em" /></td>
+          <td><input class="f-level" type="number" value="${k.level}" style="width:4em" /></td>
+          <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
+          <td><input class="f-kun" value="${escapeHtml(k.reading_kun ?? "")}" /></td>
+          <td><input class="f-radical" value="${escapeHtml(k.radical ?? "")}" style="width:3em" /></td>
+          <td><input class="f-stroke" type="number" value="${k.stroke_count ?? ""}" style="width:4em" /></td>
+          <td><input class="f-meaning" value="${escapeHtml(k.meaning ?? "")}" /></td>
+          <td>
+            <button class="save-kanji-btn">保存</button>
+            <button class="delete-kanji-btn">削除</button>
+          </td>
+        </tr>
+      `
+    )
+    .join("");
+
+  return `
+    ${renderHeader()}
+    <main>
+      <h1>管理画面 — 漢字マスタ</h1>
+      ${tabNav}
+      <form id="admin-filter-form" class="study-form">
+        <label>級
+          <select id="admin-level-filter">${levelFilterOptions(level)}</select>
+        </label>
+        <button type="submit">絞り込み</button>
+      </form>
+      <p>${kanjiList.length}件</p>
+      <table class="kanji-table admin-table">
+        <thead>
+          <tr><th>ID</th><th>漢字</th><th>級</th><th>音読み</th><th>訓読み</th><th>部首</th><th>画数</th><th>意味</th><th></th></tr>
+        </thead>
+        <tbody id="admin-kanji-rows">${rows}</tbody>
+      </table>
+
+      <h2>新規追加</h2>
+      <form id="admin-new-kanji-form" class="admin-new-form">
+        <label>漢字
+          <input type="text" id="new-k-character" required style="max-width:6em" />
+        </label>
+        <label>級
+          <input type="number" id="new-k-level" required style="max-width:6em" />
+        </label>
+        <label>音読み
+          <input type="text" id="new-k-on" />
+        </label>
+        <label>訓読み
+          <input type="text" id="new-k-kun" />
+        </label>
+        <label>部首
+          <input type="text" id="new-k-radical" style="max-width:6em" />
+        </label>
+        <label>画数
+          <input type="number" id="new-k-stroke" style="max-width:6em" />
+        </label>
+        <label>意味
+          <input type="text" id="new-k-meaning" />
+        </label>
+        <button type="submit" class="primary-btn">追加</button>
+      </form>
+      <p id="admin-message" class="message"></p>
+    </main>
+  `;
+}
+
+function attachAdminEvents(tab: AdminTab, level: string): void {
+  if (!currentUser?.isAdmin) return;
+
+  const filterForm = document.querySelector<HTMLFormElement>("#admin-filter-form");
+  filterForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const newLevel = document.querySelector<HTMLSelectElement>("#admin-level-filter")!.value;
+    navigate(`/admin?tab=${tab}&level=${newLevel}`);
+  });
+
+  const message = document.querySelector<HTMLParagraphElement>("#admin-message");
+
+  const showMessage = (text: string, ok: boolean) => {
+    if (!message) return;
+    message.classList.remove("correct", "incorrect");
+    message.classList.add(ok ? "correct" : "incorrect");
+    message.textContent = text;
+  };
+
+  if (tab === "kanji") {
+    const tbody = document.querySelector<HTMLTableSectionElement>("#admin-kanji-rows");
+
+    tbody?.addEventListener("click", async (e) => {
+      const target = e.target as HTMLElement;
+      const tr = target.closest("tr");
+      if (!tr) return;
+      const id = tr.dataset.id;
+
+      if (target.classList.contains("save-kanji-btn")) {
+        const payload = {
+          character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
+          level: Number(tr.querySelector<HTMLInputElement>(".f-level")!.value),
+          reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
+          reading_kun: tr.querySelector<HTMLInputElement>(".f-kun")!.value || null,
+          radical: tr.querySelector<HTMLInputElement>(".f-radical")!.value || null,
+          stroke_count: tr.querySelector<HTMLInputElement>(".f-stroke")!.value
+            ? Number(tr.querySelector<HTMLInputElement>(".f-stroke")!.value)
+            : null,
+          meaning: tr.querySelector<HTMLInputElement>(".f-meaning")!.value || null,
+        };
+        try {
+          await apiFetch(`/api/admin/kanji/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+          showMessage("保存しました。", true);
+        } catch (err) {
+          showMessage(`保存に失敗しました: ${(err as Error).message}`, false);
+        }
+      }
+
+      if (target.classList.contains("delete-kanji-btn")) {
+        if (!confirm("この漢字と、関連する問題・回答履歴もすべて削除されます。よろしいですか？")) return;
+        try {
+          await apiFetch(`/api/admin/kanji/${id}`, { method: "DELETE" });
+          render();
+        } catch (err) {
+          showMessage(`削除に失敗しました: ${(err as Error).message}`, false);
+        }
+      }
+    });
+
+    const newForm = document.querySelector<HTMLFormElement>("#admin-new-kanji-form");
+    newForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const payload = {
+        character: document.querySelector<HTMLInputElement>("#new-k-character")!.value,
+        level: Number(document.querySelector<HTMLInputElement>("#new-k-level")!.value),
+        reading_on: document.querySelector<HTMLInputElement>("#new-k-on")!.value || null,
+        reading_kun: document.querySelector<HTMLInputElement>("#new-k-kun")!.value || null,
+        radical: document.querySelector<HTMLInputElement>("#new-k-radical")!.value || null,
+        stroke_count: document.querySelector<HTMLInputElement>("#new-k-stroke")!.value
+          ? Number(document.querySelector<HTMLInputElement>("#new-k-stroke")!.value)
+          : null,
+        meaning: document.querySelector<HTMLInputElement>("#new-k-meaning")!.value || null,
+      };
+      try {
+        await apiFetch("/api/admin/kanji", { method: "POST", body: JSON.stringify(payload) });
+        showMessage("追加しました。", true);
+        render();
+      } catch (err) {
+        showMessage(`追加に失敗しました: ${(err as Error).message}`, false);
+      }
+    });
+    return;
+  }
+
+  // tab === "questions"
+  const tbody = document.querySelector<HTMLTableSectionElement>("#admin-question-rows");
+
+  const splitCsv = (value: string): string[] | null => {
+    const items = value
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return items.length > 0 ? items : null;
+  };
+
+  tbody?.addEventListener("click", async (e) => {
+    const target = e.target as HTMLElement;
+    const tr = target.closest("tr");
+    if (!tr) return;
+    const id = tr.dataset.id;
+
+    if (target.classList.contains("save-question-btn")) {
+      const payload = {
+        type: tr.querySelector<HTMLInputElement>(".f-type")!.value,
+        prompt: tr.querySelector<HTMLInputElement>(".f-prompt")!.value,
+        correct_answer: tr.querySelector<HTMLInputElement>(".f-correct")!.value,
+        choices: splitCsv(tr.querySelector<HTMLInputElement>(".f-choices")!.value),
+        accepted_answers: splitCsv(tr.querySelector<HTMLInputElement>(".f-accepted")!.value),
+      };
+      try {
+        await apiFetch(`/api/admin/questions/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        showMessage("保存しました。", true);
+      } catch (err) {
+        showMessage(`保存に失敗しました: ${(err as Error).message}`, false);
+      }
+    }
+
+    if (target.classList.contains("delete-question-btn")) {
+      if (!confirm("この問題と、関連する回答履歴もすべて削除されます。よろしいですか？")) return;
+      try {
+        await apiFetch(`/api/admin/questions/${id}`, { method: "DELETE" });
+        render();
+      } catch (err) {
+        showMessage(`削除に失敗しました: ${(err as Error).message}`, false);
+      }
+    }
+  });
+
+  const newForm = document.querySelector<HTMLFormElement>("#admin-new-question-form");
+  newForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const payload = {
+      kanjiId: Number(document.querySelector<HTMLInputElement>("#new-q-kanji-id")!.value),
+      type: document.querySelector<HTMLInputElement>("#new-q-type")!.value,
+      prompt: document.querySelector<HTMLInputElement>("#new-q-prompt")!.value,
+      correct_answer: document.querySelector<HTMLInputElement>("#new-q-correct")!.value,
+      choices: splitCsv(document.querySelector<HTMLInputElement>("#new-q-choices")!.value),
+      accepted_answers: splitCsv(document.querySelector<HTMLInputElement>("#new-q-accepted")!.value),
+    };
+    try {
+      await apiFetch("/api/admin/questions", { method: "POST", body: JSON.stringify(payload) });
+      showMessage("追加しました。", true);
+      render();
+    } catch (err) {
+      showMessage(`追加に失敗しました: ${(err as Error).message}`, false);
+    }
+  });
+}
+
 // ---------- 描画メイン ----------
 
 async function render(): Promise<void> {
@@ -432,6 +783,15 @@ async function render(): Promise<void> {
     app.innerHTML = await renderStudy(level, q);
     attachHeaderEvents();
     attachStudyEvents();
+    return;
+  }
+
+  if (path === "/admin") {
+    const tab: AdminTab = params.get("tab") === "questions" ? "questions" : "kanji";
+    const level = params.get("level") || "";
+    app.innerHTML = await renderAdmin(tab, level);
+    attachHeaderEvents();
+    attachAdminEvents(tab, level);
     return;
   }
 
