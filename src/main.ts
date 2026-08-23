@@ -607,8 +607,8 @@ async function renderAdmin(tab: AdminTab, level: string): Promise<string> {
   `;
 }
 
-function attachAdminEvents(tab: AdminTab, level: string): void {
-  if (!currentUser?.isAdmin) return;
+function attachAdminEvents(tab: AdminTab, _level: string): void {
+    if (!currentUser?.isAdmin) return;
 
   const filterForm = document.querySelector<HTMLFormElement>("#admin-filter-form");
   filterForm?.addEventListener("submit", (e) => {
