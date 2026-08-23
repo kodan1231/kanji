@@ -23,6 +23,16 @@ interface KanjiRow {
   meaning: string | null;
 }
 
+interface TagRef {
+  id: number;
+  name: string;
+}
+
+interface AdminKanjiRow extends KanjiRow {
+  entry_type: string;
+  tags: TagRef[];
+}
+
 interface AdminQuestionRow {
   id: number;
   kanjiId: number;
@@ -431,7 +441,32 @@ function levelFilterOptions(current: string): string {
     .join("");
 }
 
-async function renderAdmin(tab: AdminTab, level: string): Promise<string> {
+function entryTypeOptionsHtml(current: string): string {
+  const types = [
+    { value: "", label: "すべて" },
+    { value: "kanji", label: "漢字" },
+    { value: "word", label: "熟語" },
+    { value: "yoji", label: "四字熟語" },
+  ];
+  return types
+    .map((t) => `<option value="${t.value}" ${current === t.value ? "selected" : ""}>${t.label}</option>`)
+    .join("");
+}
+
+function entryTypeSelectHtml(current: string, cssClass: string): string {
+  const types = [
+    { value: "kanji", label: "漢字" },
+    { value: "word", label: "熟語" },
+    { value: "yoji", label: "四字熟語" },
+  ];
+  return `
+    <select class="${cssClass}">
+      ${types.map((t) => `<option value="${t.value}" ${current === t.value ? "selected" : ""}>${t.label}</option>`).join("")}
+    </select>
+  `;
+}
+
+async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagId: string): Promise<string> {
   if (!currentUser) {
     return `
       ${renderHeader()}
@@ -532,23 +567,35 @@ async function renderAdmin(tab: AdminTab, level: string): Promise<string> {
   }
 
   // tab === "kanji"
+  const tagsData = await apiFetch("/api/admin/tags");
+  const allTags: (TagRef & { usage_count: number })[] = tagsData.tags;
+
   const params = new URLSearchParams();
   if (level) params.set("level", level);
+  if (entryType) params.set("entryType", entryType);
+  if (tagId) params.set("tagId", tagId);
   const data = await apiFetch(`/api/admin/kanji?${params.toString()}`);
-  const kanjiList: KanjiRow[] = data.kanji;
+  const kanjiList: AdminKanjiRow[] = data.kanji;
+
+  const tagFilterOptions = `
+    <option value="">すべて</option>
+    ${allTags.map((t) => `<option value="${t.id}" ${tagId === String(t.id) ? "selected" : ""}>${escapeHtml(t.name)}（${t.usage_count}件）</option>`).join("")}
+  `;
 
   const rows = kanjiList
     .map(
       (k) => `
         <tr data-id="${k.id}">
           <td>${k.id}</td>
-          <td><input class="f-character" value="${escapeHtml(k.character)}" style="width:3em" /></td>
+          <td>${entryTypeSelectHtml(k.entry_type, "f-entry-type")}</td>
+          <td><input class="f-character" value="${escapeHtml(k.character)}" style="width:6em" /></td>
           <td><input class="f-level" type="number" value="${k.level}" style="width:4em" /></td>
           <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
           <td><input class="f-kun" value="${escapeHtml(k.reading_kun ?? "")}" /></td>
           <td><input class="f-radical" value="${escapeHtml(k.radical ?? "")}" style="width:3em" /></td>
           <td><input class="f-stroke" type="number" value="${k.stroke_count ?? ""}" style="width:4em" /></td>
           <td><input class="f-meaning" value="${escapeHtml(k.meaning ?? "")}" /></td>
+          <td><input class="f-tags" value="${escapeHtml(k.tags.map((t) => t.name).join(","))}" placeholder="カンマ区切り" /></td>
           <td>
             <button class="save-kanji-btn">保存</button>
             <button class="delete-kanji-btn">削除</button>
@@ -567,20 +614,29 @@ async function renderAdmin(tab: AdminTab, level: string): Promise<string> {
         <label>級
           <select id="admin-level-filter">${levelFilterOptions(level)}</select>
         </label>
+        <label>種別
+          <select id="admin-entry-type-filter">${entryTypeOptionsHtml(entryType)}</select>
+        </label>
+        <label>タグ
+          <select id="admin-tag-filter">${tagFilterOptions}</select>
+        </label>
         <button type="submit">絞り込み</button>
       </form>
       <p>${kanjiList.length}件</p>
       <table class="kanji-table admin-table">
         <thead>
-          <tr><th>ID</th><th>漢字</th><th>級</th><th>音読み</th><th>訓読み</th><th>部首</th><th>画数</th><th>意味</th><th></th></tr>
+          <tr><th>ID</th><th>種別</th><th>文字</th><th>級</th><th>音読み</th><th>訓読み</th><th>部首</th><th>画数</th><th>意味</th><th>タグ</th><th></th></tr>
         </thead>
         <tbody id="admin-kanji-rows">${rows}</tbody>
       </table>
 
       <h2>新規追加</h2>
       <form id="admin-new-kanji-form" class="admin-new-form">
-        <label>漢字
-          <input type="text" id="new-k-character" required style="max-width:6em" />
+        <label>種別
+          ${entryTypeSelectHtml("kanji", "new-k-entry-type")}
+        </label>
+        <label>文字（1文字の漢字、熟語、四字熟語など）
+          <input type="text" id="new-k-character" required />
         </label>
         <label>級
           <input type="number" id="new-k-level" required style="max-width:6em" />
@@ -600,21 +656,48 @@ async function renderAdmin(tab: AdminTab, level: string): Promise<string> {
         <label>意味
           <input type="text" id="new-k-meaning" />
         </label>
+        <label>タグ（カンマ区切り、任意。新しいタグ名は自動作成されます）
+          <input type="text" id="new-k-tags" placeholder="例: 動物,水中生物" />
+        </label>
         <button type="submit" class="primary-btn">追加</button>
       </form>
+
+      <h2>タグ一覧</h2>
+      <table class="kanji-table admin-table" id="admin-tag-list-table">
+        <thead><tr><th>タグ名</th><th>使用件数</th><th></th></tr></thead>
+        <tbody>
+          ${allTags
+            .map(
+              (t) => `
+                <tr data-tag-id="${t.id}">
+                  <td>${escapeHtml(t.name)}</td>
+                  <td>${t.usage_count}</td>
+                  <td><button class="delete-tag-btn">削除</button></td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
       <p id="admin-message" class="message"></p>
     </main>
   `;
 }
 
-function attachAdminEvents(tab: AdminTab, _level: string): void {
-    if (!currentUser?.isAdmin) return;
+function attachAdminEvents(tab: AdminTab, level: string, entryType: string, tagId: string): void {
+  if (!currentUser?.isAdmin) return;
 
   const filterForm = document.querySelector<HTMLFormElement>("#admin-filter-form");
   filterForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     const newLevel = document.querySelector<HTMLSelectElement>("#admin-level-filter")!.value;
-    navigate(`/admin?tab=${tab}&level=${newLevel}`);
+    if (tab === "kanji") {
+      const newEntryType = document.querySelector<HTMLSelectElement>("#admin-entry-type-filter")!.value;
+      const newTagId = document.querySelector<HTMLSelectElement>("#admin-tag-filter")!.value;
+      navigate(`/admin?tab=kanji&level=${newLevel}&entryType=${newEntryType}&tagId=${newTagId}`);
+    } else {
+      navigate(`/admin?tab=questions&level=${newLevel}`);
+    }
   });
 
   const message = document.querySelector<HTMLParagraphElement>("#admin-message");
@@ -624,6 +707,14 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
     message.classList.remove("correct", "incorrect");
     message.classList.add(ok ? "correct" : "incorrect");
     message.textContent = text;
+  };
+
+  const splitCsv = (value: string): string[] | null => {
+    const items = value
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return items.length > 0 ? items : null;
   };
 
   if (tab === "kanji") {
@@ -637,6 +728,7 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
 
       if (target.classList.contains("save-kanji-btn")) {
         const payload = {
+          entry_type: tr.querySelector<HTMLSelectElement>(".f-entry-type")!.value,
           character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
           level: Number(tr.querySelector<HTMLInputElement>(".f-level")!.value),
           reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
@@ -646,6 +738,7 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
             ? Number(tr.querySelector<HTMLInputElement>(".f-stroke")!.value)
             : null,
           meaning: tr.querySelector<HTMLInputElement>(".f-meaning")!.value || null,
+          tags: splitCsv(tr.querySelector<HTMLInputElement>(".f-tags")!.value) || [],
         };
         try {
           await apiFetch(`/api/admin/kanji/${id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -656,7 +749,7 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
       }
 
       if (target.classList.contains("delete-kanji-btn")) {
-        if (!confirm("この漢字と、関連する問題・回答履歴もすべて削除されます。よろしいですか？")) return;
+        if (!confirm("このエントリと、関連する問題・回答履歴もすべて削除されます。よろしいですか？")) return;
         try {
           await apiFetch(`/api/admin/kanji/${id}`, { method: "DELETE" });
           render();
@@ -670,6 +763,7 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
     newForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
       const payload = {
+        entry_type: document.querySelector<HTMLSelectElement>(".new-k-entry-type")!.value,
         character: document.querySelector<HTMLInputElement>("#new-k-character")!.value,
         level: Number(document.querySelector<HTMLInputElement>("#new-k-level")!.value),
         reading_on: document.querySelector<HTMLInputElement>("#new-k-on")!.value || null,
@@ -679,6 +773,7 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
           ? Number(document.querySelector<HTMLInputElement>("#new-k-stroke")!.value)
           : null,
         meaning: document.querySelector<HTMLInputElement>("#new-k-meaning")!.value || null,
+        tags: splitCsv(document.querySelector<HTMLInputElement>("#new-k-tags")!.value),
       };
       try {
         await apiFetch("/api/admin/kanji", { method: "POST", body: JSON.stringify(payload) });
@@ -688,19 +783,27 @@ function attachAdminEvents(tab: AdminTab, _level: string): void {
         showMessage(`追加に失敗しました: ${(err as Error).message}`, false);
       }
     });
+
+    const tagListTable = document.querySelector<HTMLTableElement>("#admin-tag-list-table");
+    tagListTable?.addEventListener("click", async (e) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains("delete-tag-btn")) return;
+      const tr = target.closest("tr");
+      const tagIdToDelete = tr?.dataset.tagId;
+      if (!tagIdToDelete) return;
+      if (!confirm("このタグを削除します（各エントリからも解除されます）。よろしいですか？")) return;
+      try {
+        await apiFetch(`/api/admin/tags/${tagIdToDelete}`, { method: "DELETE" });
+        render();
+      } catch (err) {
+        showMessage(`タグ削除に失敗しました: ${(err as Error).message}`, false);
+      }
+    });
     return;
   }
 
   // tab === "questions"
   const tbody = document.querySelector<HTMLTableSectionElement>("#admin-question-rows");
-
-  const splitCsv = (value: string): string[] | null => {
-    const items = value
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    return items.length > 0 ? items : null;
-  };
 
   tbody?.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
@@ -789,9 +892,11 @@ async function render(): Promise<void> {
   if (path === "/admin") {
     const tab: AdminTab = params.get("tab") === "questions" ? "questions" : "kanji";
     const level = params.get("level") || "";
-    app.innerHTML = await renderAdmin(tab, level);
+    const entryType = params.get("entryType") || "";
+    const tagId = params.get("tagId") || "";
+    app.innerHTML = await renderAdmin(tab, level, entryType, tagId);
     attachHeaderEvents();
-    attachAdminEvents(tab, level);
+    attachAdminEvents(tab, level, entryType, tagId);
     return;
   }
 

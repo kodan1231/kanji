@@ -17,6 +17,11 @@ interface SessionUser {
   isAdmin: boolean;
 }
 
+interface TagRef {
+  id: number;
+  name: string;
+}
+
 const SESSION_COOKIE = "session_token";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // 30日
 
@@ -96,14 +101,68 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
+// タグ名の配列から、既存タグはそのIDを使い、存在しないタグ名は新規作成してIDを返す
+async function resolveTagIds(env: Env, tagNames: string[]): Promise<number[]> {
+  const ids: number[] = [];
+  for (const rawName of tagNames) {
+    const name = rawName.trim();
+    if (!name) continue;
+    const existing = await env.DB.prepare("SELECT id FROM tags WHERE name = ?").bind(name).first<{ id: number }>();
+    if (existing) {
+      ids.push(existing.id);
+    } else {
+      const result = await env.DB.prepare("INSERT INTO tags (name) VALUES (?)").bind(name).run();
+      ids.push(Number(result.meta.last_row_id));
+    }
+  }
+  return ids;
+}
+
+// 指定した漢字IDに紐づくタグを、渡されたtagIdsの内容で置き換える
+async function setKanjiTags(env: Env, kanjiId: number, tagIds: number[]): Promise<void> {
+  await env.DB.prepare("DELETE FROM kanji_tags WHERE kanji_id = ?").bind(kanjiId).run();
+  for (const tagId of tagIds) {
+    await env.DB
+      .prepare("INSERT INTO kanji_tags (kanji_id, tag_id) VALUES (?, ?)")
+      .bind(kanjiId, tagId)
+      .run();
+  }
+}
+
+// 複数の漢字IDに対するタグを一括取得し、kanjiId -> タグ配列 のマップを返す
+async function getTagsForKanjiIds(env: Env, kanjiIds: number[]): Promise<Map<number, TagRef[]>> {
+  const map = new Map<number, TagRef[]>();
+  if (kanjiIds.length === 0) return map;
+  const placeholders = kanjiIds.map(() => "?").join(",");
+  const { results } = await env.DB
+    .prepare(
+      `SELECT kt.kanji_id AS kanji_id, t.id AS tag_id, t.name AS tag_name
+       FROM kanji_tags kt
+       JOIN tags t ON kt.tag_id = t.id
+       WHERE kt.kanji_id IN (${placeholders})
+       ORDER BY t.name`
+    )
+    .bind(...kanjiIds)
+    .all<{ kanji_id: number; tag_id: number; tag_name: string }>();
+
+  for (const row of results) {
+    const list = map.get(row.kanji_id) || [];
+    list.push({ id: row.tag_id, name: row.tag_name });
+    map.set(row.kanji_id, list);
+  }
+  return map;
+}
+
 interface AdminKanjiInput {
   character?: string;
   level?: number;
+  entry_type?: string;
   reading_on?: string | null;
   reading_kun?: string | null;
   radical?: string | null;
   stroke_count?: number | null;
   meaning?: string | null;
+  tags?: string[] | null;
 }
 
 interface AdminQuestionInput {
@@ -338,26 +397,86 @@ export default {
         return jsonResponse({ error: "admin only" }, { status: 403 });
       }
 
+      // ---- タグ ----
+
+      if (pathname === "/api/admin/tags" && method === "GET") {
+        const { results } = await env.DB
+          .prepare(
+            `SELECT t.id, t.name, COUNT(kt.kanji_id) AS usage_count
+             FROM tags t
+             LEFT JOIN kanji_tags kt ON kt.tag_id = t.id
+             GROUP BY t.id
+             ORDER BY t.name`
+          )
+          .all<{ id: number; name: string; usage_count: number }>();
+        return jsonResponse({ tags: results });
+      }
+
+      const tagIdMatch = pathname.match(/^\/api\/admin\/tags\/(\d+)$/);
+      if (tagIdMatch && method === "DELETE") {
+        const tagId = Number(tagIdMatch[1]);
+        await env.DB.prepare("DELETE FROM kanji_tags WHERE tag_id = ?").bind(tagId).run();
+        await env.DB.prepare("DELETE FROM tags WHERE id = ?").bind(tagId).run();
+        return jsonResponse({ status: "ok" });
+      }
+
       // ---- 漢字マスタ CRUD ----
 
       if (pathname === "/api/admin/kanji" && method === "GET") {
         const level = url.searchParams.get("level");
         const q = url.searchParams.get("q");
+        const entryType = url.searchParams.get("entryType");
+        const tagId = url.searchParams.get("tagId");
+
         let query =
-          "SELECT id, character, level, reading_on, reading_kun, radical, stroke_count, meaning FROM kanji WHERE 1=1";
+          "SELECT DISTINCT k.id, k.character, k.level, k.entry_type, k.reading_on, k.reading_kun, k.radical, k.stroke_count, k.meaning FROM kanji k";
         const params: (string | number)[] = [];
+
+        if (tagId) {
+          query += " JOIN kanji_tags kt ON kt.kanji_id = k.id AND kt.tag_id = ?";
+          params.push(Number(tagId));
+        }
+
+        query += " WHERE 1=1";
         if (level) {
-          query += " AND level = ?";
+          query += " AND k.level = ?";
           params.push(Number(level));
         }
+        if (entryType) {
+          query += " AND k.entry_type = ?";
+          params.push(entryType);
+        }
         if (q) {
-          query += " AND (character LIKE ? OR reading_on LIKE ? OR reading_kun LIKE ?)";
+          query += " AND (k.character LIKE ? OR k.reading_on LIKE ? OR k.reading_kun LIKE ?)";
           const like = `%${q}%`;
           params.push(like, like, like);
         }
-        query += " ORDER BY level, id";
-        const { results } = await env.DB.prepare(query).bind(...params).all();
-        return jsonResponse({ kanji: results });
+        query += " ORDER BY k.level, k.id";
+
+        const { results } = await env.DB
+          .prepare(query)
+          .bind(...params)
+          .all<{
+            id: number;
+            character: string;
+            level: number;
+            entry_type: string;
+            reading_on: string | null;
+            reading_kun: string | null;
+            radical: string | null;
+            stroke_count: number | null;
+            meaning: string | null;
+          }>();
+
+        const ids = results.map((r) => r.id);
+        const tagsMap = await getTagsForKanjiIds(env, ids);
+
+        const kanji = results.map((row) => ({
+          ...row,
+          tags: tagsMap.get(row.id) || [],
+        }));
+
+        return jsonResponse({ kanji });
       }
 
       if (pathname === "/api/admin/kanji" && method === "POST") {
@@ -367,12 +486,13 @@ export default {
         }
         const result = await env.DB
           .prepare(
-            `INSERT INTO kanji (character, level, reading_on, reading_kun, radical, stroke_count, meaning)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO kanji (character, level, entry_type, reading_on, reading_kun, radical, stroke_count, meaning)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .bind(
             body.character,
             body.level,
+            body.entry_type || "kanji",
             body.reading_on ?? null,
             body.reading_kun ?? null,
             body.radical ?? null,
@@ -380,7 +500,14 @@ export default {
             body.meaning ?? null
           )
           .run();
-        return jsonResponse({ status: "ok", id: result.meta.last_row_id }, { status: 201 });
+        const newId = Number(result.meta.last_row_id);
+
+        if (body.tags && body.tags.length > 0) {
+          const tagIds = await resolveTagIds(env, body.tags);
+          await setKanjiTags(env, newId, tagIds);
+        }
+
+        return jsonResponse({ status: "ok", id: newId }, { status: 201 });
       }
 
       const kanjiIdMatch = pathname.match(/^\/api\/admin\/kanji\/(\d+)$/);
@@ -394,12 +521,13 @@ export default {
           }
           await env.DB
             .prepare(
-              `UPDATE kanji SET character = ?, level = ?, reading_on = ?, reading_kun = ?, radical = ?, stroke_count = ?, meaning = ?
+              `UPDATE kanji SET character = ?, level = ?, entry_type = ?, reading_on = ?, reading_kun = ?, radical = ?, stroke_count = ?, meaning = ?
                WHERE id = ?`
             )
             .bind(
               body.character,
               body.level,
+              body.entry_type || "kanji",
               body.reading_on ?? null,
               body.reading_kun ?? null,
               body.radical ?? null,
@@ -408,11 +536,17 @@ export default {
               kanjiId
             )
             .run();
+
+          if (body.tags !== undefined) {
+            const tagIds = body.tags && body.tags.length > 0 ? await resolveTagIds(env, body.tags) : [];
+            await setKanjiTags(env, kanjiId, tagIds);
+          }
+
           return jsonResponse({ status: "ok" });
         }
 
         if (method === "DELETE") {
-          // 関連する問題・回答履歴も合わせて削除（外部キーの不整合を防ぐため）
+          // 関連する問題・回答履歴・タグ付けも合わせて削除（外部キーの不整合を防ぐため）
           await env.DB
             .prepare(
               `DELETE FROM attempts WHERE question_id IN (SELECT id FROM questions WHERE kanji_id = ?)`
@@ -420,6 +554,7 @@ export default {
             .bind(kanjiId)
             .run();
           await env.DB.prepare("DELETE FROM questions WHERE kanji_id = ?").bind(kanjiId).run();
+          await env.DB.prepare("DELETE FROM kanji_tags WHERE kanji_id = ?").bind(kanjiId).run();
           await env.DB.prepare("DELETE FROM kanji WHERE id = ?").bind(kanjiId).run();
           return jsonResponse({ status: "ok" });
         }
