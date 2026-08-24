@@ -455,3 +455,45 @@ h2 {
   width: 4em;
   max-width: 4em;
 }
+
+/* チャレンジコース一括表示 */
+.question-block {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.question-block .prompt {
+  text-align: left;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.question-block input[type="text"] {
+  max-width: 240px;
+}
+
+.result-item {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: 10px 16px;
+  margin-bottom: 8px;
+}
+
+.result-item.correct {
+  border-left-color: var(--color-indigo);
+}
+
+.result-item.incorrect {
+  border-left-color: var(--color-hanko);
+}
+
+.result-item .prompt {
+  text-align: left;
+  margin-bottom: 4px;
+  font-size: 0.95rem;
+}

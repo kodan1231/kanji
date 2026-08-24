@@ -58,8 +58,8 @@ interface AdminQuestionRow {
 let currentUser: User = null;
 
 let challengeQuestions: ChallengeQuestion[] = [];
-let challengeIndex = 0;
-let challengeScore = 0;
+let challengeSubmitted = false;
+let challengeResults: { correct: boolean; correctAnswer: string }[] = [];
 let lastChallengeQuery: string | null = null;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -340,8 +340,8 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
   if (challengeQuestions.length === 0 || queryKey !== lastChallengeQuery) {
     const data = await apiFetch(`/api/questions/challenge?${challengeParams(filter).toString()}`);
     challengeQuestions = data.questions;
-    challengeIndex = 0;
-    challengeScore = 0;
+    challengeSubmitted = false;
+    challengeResults = [];
     lastChallengeQuery = queryKey;
   }
 
@@ -356,13 +356,30 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
     `;
   }
 
-  if (challengeIndex >= challengeQuestions.length) {
+  if (challengeSubmitted) {
+    const score = challengeResults.filter((r) => r.correct).length;
+    const itemsHtml = challengeQuestions
+      .map((q, i) => {
+        const r = challengeResults[i];
+        const cls = r.correct ? "correct" : "incorrect";
+        return `
+          <div class="result-item ${cls}">
+            <p class="prompt">${i + 1}. ${escapeHtml(q.prompt)}</p>
+            <p class="message ${cls}">${
+              r.correct ? "正解！" : `不正解。正解は「${escapeHtml(r.correctAnswer)}」でした。`
+            }</p>
+          </div>
+        `;
+      })
+      .join("");
+
     return `
       ${renderHeader()}
       <main>
         <h1>結果発表</h1>
         <div class="kanji-cell">終</div>
-        <p class="prompt">${challengeQuestions.length}問中 ${challengeScore}問 正解でした！</p>
+        <p class="prompt">${challengeQuestions.length}問中 ${score}問 正解でした！</p>
+        ${itemsHtml}
         <div class="home-actions">
           <button id="retry-btn" class="primary-btn">もう一度挑戦する</button>
           <a href="#/">ホームに戻る</a>
@@ -371,30 +388,38 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
     `;
   }
 
-  const q = challengeQuestions[challengeIndex];
+  const questionsHtml = challengeQuestions
+    .map((q, i) => {
+      const answerArea =
+        filter.mode === "input"
+          ? `
+            <label for="answer-input-${i}">読み方をひらがなで入力してください</label>
+            <input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />
+          `
+          : (q.choices || [])
+              .map(
+                (c) =>
+                  `<label class="choice"><input type="radio" name="choice-${i}" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
+              )
+              .join("");
 
-  const answerAreaHtml =
-    filter.mode === "input"
-      ? `
-        <label for="answer-input">読み方をひらがなで入力してください</label>
-        <input type="text" id="answer-input" autocomplete="off" autofocus />
-      `
-      : (q.choices || [])
-          .map(
-            (c) =>
-              `<label class="choice"><input type="radio" name="choice" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
-          )
-          .join("");
+      return `
+        <div class="question-block">
+          <p class="prompt">${i + 1}. ${escapeHtml(q.prompt)}</p>
+          ${answerArea}
+        </div>
+      `;
+    })
+    .join("");
 
   return `
     ${renderHeader()}
     <main>
       <h1>チャレンジコース</h1>
-      <p class="progress">問題 ${challengeIndex + 1} / ${challengeQuestions.length}（正解 ${challengeScore}問）</p>
-      <p class="prompt">${escapeHtml(q.prompt)}</p>
+      <p class="progress">全${challengeQuestions.length}問</p>
       <form id="challenge-form">
-        ${answerAreaHtml}
-        <button type="submit">回答する</button>
+        ${questionsHtml}
+        <button type="submit" class="primary-btn">まとめて回答する</button>
       </form>
       <p id="challenge-feedback" class="message"></p>
     </main>
@@ -403,13 +428,14 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
 
 function attachChallengeEvents(filter: ChallengeFilter): void {
   if (!currentUser) return;
-
   if (challengeQuestions.length === 0) return;
 
-  if (challengeIndex >= challengeQuestions.length) {
+  if (challengeSubmitted) {
     document.querySelector("#retry-btn")?.addEventListener("click", () => {
       challengeQuestions = [];
       lastChallengeQuery = null;
+      challengeSubmitted = false;
+      challengeResults = [];
       navigate(`/challenge?${challengeHashParams(filter).toString()}`);
       render();
     });
@@ -422,47 +448,41 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    let answer: string | null = null;
-    if (filter.mode === "input") {
-      const input = document.querySelector<HTMLInputElement>("#answer-input");
-      answer = input?.value.trim() || null;
-      if (!answer) {
-        feedback.textContent = "読み方を入力してください。";
-        return;
+    const answers: (string | null)[] = challengeQuestions.map((_, i) => {
+      if (filter.mode === "input") {
+        const input = document.querySelector<HTMLInputElement>(`#answer-input-${i}`);
+        return input?.value.trim() || null;
+      } else {
+        const selected = form.querySelector<HTMLInputElement>(`input[name="choice-${i}"]:checked`);
+        return selected?.value || null;
       }
-    } else {
-      const selected = form.querySelector<HTMLInputElement>('input[name="choice"]:checked');
-      if (!selected) {
-        feedback.textContent = "選択肢を選んでください。";
-        return;
-      }
-      answer = selected.value;
+    });
+
+    if (answers.some((a) => !a)) {
+      feedback.classList.remove("correct");
+      feedback.classList.add("incorrect");
+      feedback.textContent = "すべての問題に回答してください。";
+      return;
     }
 
     const submitBtn = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
     submitBtn.disabled = true;
+    feedback.classList.remove("correct", "incorrect");
+    feedback.textContent = "採点中...";
 
-    const q = challengeQuestions[challengeIndex];
     try {
-      const result = await apiFetch("/api/questions/answer", {
-        method: "POST",
-        body: JSON.stringify({ questionId: q.id, answer }),
-      });
-
-      feedback.classList.remove("correct", "incorrect");
-      if (result.correct) {
-        challengeScore++;
-        feedback.classList.add("correct");
-        feedback.textContent = "正解！";
-      } else {
-        feedback.classList.add("incorrect");
-        feedback.textContent = `不正解。正解は「${escapeHtml(result.correctAnswer)}」でした。`;
+      const results: { correct: boolean; correctAnswer: string }[] = [];
+      for (let i = 0; i < challengeQuestions.length; i++) {
+        const q = challengeQuestions[i];
+        const result = await apiFetch("/api/questions/answer", {
+          method: "POST",
+          body: JSON.stringify({ questionId: q.id, answer: answers[i] }),
+        });
+        results.push({ correct: result.correct, correctAnswer: result.correctAnswer });
       }
-
-      setTimeout(() => {
-        challengeIndex++;
-        render();
-      }, 900);
+      challengeResults = results;
+      challengeSubmitted = true;
+      render();
     } catch (err) {
       submitBtn.disabled = false;
       feedback.classList.add("incorrect");
