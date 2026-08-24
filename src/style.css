@@ -415,3 +415,43 @@ h2 {
   font-size: 1.2rem;
   margin: 32px 0 16px;
 }
+
+/* ホーム画面のフィルタUI */
+.filter-group {
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: #fff;
+}
+
+.filter-group legend {
+  padding: 0 6px;
+  font-weight: 500;
+  color: var(--color-indigo);
+}
+
+.checkbox-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 12px 4px 0;
+  font-weight: 400;
+}
+
+.checkbox-item input {
+  margin: 0;
+}
+
+.inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px 0 0;
+  font-weight: 400;
+}
+
+.inline-label input[type="number"] {
+  width: 4em;
+  max-width: 4em;
+}

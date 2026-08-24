@@ -10,6 +10,15 @@ interface ChallengeQuestion {
   type: string;
   prompt: string;
   choices: string[] | null;
+  difficulty?: number;
+}
+
+interface ChallengeFilter {
+  levels: string;
+  tagIds: string;
+  difficultyMin: string;
+  difficultyMax: string;
+  mode: AnswerMode;
 }
 
 interface KanjiRow {
@@ -43,6 +52,7 @@ interface AdminQuestionRow {
   correctAnswer: string;
   choices: string[] | null;
   acceptedAnswers: string[] | null;
+  difficulty: number;
 }
 
 let currentUser: User = null;
@@ -50,7 +60,7 @@ let currentUser: User = null;
 let challengeQuestions: ChallengeQuestion[] = [];
 let challengeIndex = 0;
 let challengeScore = 0;
-let lastChallengeLevel: string | null = null;
+let lastChallengeQuery: string | null = null;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -130,25 +140,66 @@ function escapeHtml(text: string): string {
 
 // ---------- ホーム画面 ----------
 
-function renderHome(): string {
+async function renderHome(): Promise<string> {
+  const tagsData = await apiFetch("/api/tags");
+  const tags: TagRef[] = tagsData.tags;
+
+  const tagCheckboxes = tags.length
+    ? tags
+        .map(
+          (t) =>
+            `<label class="checkbox-item"><input type="checkbox" class="challenge-tag" value="${t.id}" /> ${escapeHtml(t.name)}</label>`
+        )
+        .join("")
+    : "<p>登録されているタグはまだありません。</p>";
+
   return `
     ${renderHeader()}
     <main>
-      <h1>漢字マス — 出題レベルを選ぶ</h1>
+      <h1>漢字マス</h1>
       <div class="kanji-cell">漢</div>
-      <label for="level-select">レベル</label>
-      <select id="level-select">
-        <option value="10">10級（小学1年相当）</option>
-        <option value="9">9級（小学2年相当）</option>
-        <option value="8">8級（小学3年相当）</option>
-      </select>
-      <label for="mode-select">チャレンジの回答形式</label>
+
+      <h2>チャレンジコースの出題条件</h2>
+      <fieldset class="filter-group">
+        <legend>級（複数選択可。未選択の場合は全級対象）</legend>
+        <label class="checkbox-item"><input type="checkbox" class="challenge-level" value="10" /> 10級</label>
+        <label class="checkbox-item"><input type="checkbox" class="challenge-level" value="9" /> 9級</label>
+        <label class="checkbox-item"><input type="checkbox" class="challenge-level" value="8" /> 8級</label>
+      </fieldset>
+
+      <fieldset class="filter-group">
+        <legend>タグ（複数選択可。未選択の場合は全タグ対象）</legend>
+        ${tagCheckboxes}
+      </fieldset>
+
+      <fieldset class="filter-group">
+        <legend>難易度（内部10段階。正答率が低いほど難しい）</legend>
+        <label class="inline-label">最小
+          <input type="number" id="difficulty-min" min="1" max="10" value="1" />
+        </label>
+        <label class="inline-label">最大
+          <input type="number" id="difficulty-max" min="1" max="10" value="10" />
+        </label>
+      </fieldset>
+
+      <label for="mode-select">回答形式</label>
       <select id="mode-select">
         <option value="choice">4択で選ぶ</option>
         <option value="input">文字を入力する</option>
       </select>
+
       <div class="home-actions">
         <button id="challenge-btn" class="primary-btn">チャレンジコースへ</button>
+      </div>
+
+      <h2>スタディコース</h2>
+      <label for="home-study-level">級</label>
+      <select id="home-study-level">
+        <option value="10">10級（小学1年相当）</option>
+        <option value="9">9級（小学2年相当）</option>
+        <option value="8">8級（小学3年相当）</option>
+      </select>
+      <div class="home-actions">
         <button id="study-btn">スタディコースへ</button>
       </div>
     </main>
@@ -156,13 +207,30 @@ function renderHome(): string {
 }
 
 function attachHomeEvents(): void {
-  const levelSelect = document.querySelector<HTMLSelectElement>("#level-select")!;
-  const modeSelect = document.querySelector<HTMLSelectElement>("#mode-select")!;
   document.querySelector("#challenge-btn")?.addEventListener("click", () => {
-    navigate(`/challenge?level=${levelSelect.value}&mode=${modeSelect.value}`);
+    const levels = Array.from(document.querySelectorAll<HTMLInputElement>(".challenge-level:checked")).map(
+      (el) => el.value
+    );
+    const tagIds = Array.from(document.querySelectorAll<HTMLInputElement>(".challenge-tag:checked")).map(
+      (el) => el.value
+    );
+    const difficultyMin = document.querySelector<HTMLInputElement>("#difficulty-min")!.value || "1";
+    const difficultyMax = document.querySelector<HTMLInputElement>("#difficulty-max")!.value || "10";
+    const mode = document.querySelector<HTMLSelectElement>("#mode-select")!.value;
+
+    const params = new URLSearchParams();
+    if (levels.length > 0) params.set("levels", levels.join(","));
+    if (tagIds.length > 0) params.set("tagIds", tagIds.join(","));
+    params.set("difficultyMin", difficultyMin);
+    params.set("difficultyMax", difficultyMax);
+    params.set("mode", mode);
+
+    navigate(`/challenge?${params.toString()}`);
   });
+
   document.querySelector("#study-btn")?.addEventListener("click", () => {
-    navigate(`/study?level=${levelSelect.value}`);
+    const level = document.querySelector<HTMLSelectElement>("#home-study-level")!.value;
+    navigate(`/study?level=${level}`);
   });
 }
 
@@ -237,7 +305,26 @@ function attachLoginEvents(): void {
 
 // ---------- チャレンジコース ----------
 
-async function renderChallenge(level: string, mode: AnswerMode): Promise<string> {
+function challengeQueryKey(filter: ChallengeFilter): string {
+  return `${filter.levels}|${filter.tagIds}|${filter.difficultyMin}|${filter.difficultyMax}`;
+}
+
+function challengeParams(filter: ChallengeFilter): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filter.levels) params.set("levels", filter.levels);
+  if (filter.tagIds) params.set("tagIds", filter.tagIds);
+  params.set("difficultyMin", filter.difficultyMin);
+  params.set("difficultyMax", filter.difficultyMax);
+  return params;
+}
+
+function challengeHashParams(filter: ChallengeFilter): URLSearchParams {
+  const params = challengeParams(filter);
+  params.set("mode", filter.mode);
+  return params;
+}
+
+async function renderChallenge(filter: ChallengeFilter): Promise<string> {
   if (!currentUser) {
     return `
       ${renderHeader()}
@@ -249,12 +336,24 @@ async function renderChallenge(level: string, mode: AnswerMode): Promise<string>
     `;
   }
 
-  if (challengeQuestions.length === 0 || level !== lastChallengeLevel) {
-    const data = await apiFetch(`/api/questions/challenge?level=${level}`);
+  const queryKey = challengeQueryKey(filter);
+  if (challengeQuestions.length === 0 || queryKey !== lastChallengeQuery) {
+    const data = await apiFetch(`/api/questions/challenge?${challengeParams(filter).toString()}`);
     challengeQuestions = data.questions;
     challengeIndex = 0;
     challengeScore = 0;
-    lastChallengeLevel = level;
+    lastChallengeQuery = queryKey;
+  }
+
+  if (challengeQuestions.length === 0) {
+    return `
+      ${renderHeader()}
+      <main>
+        <h1>チャレンジコース</h1>
+        <p>指定した条件に合う問題が見つかりませんでした。条件を変えて試してください。</p>
+        <a href="#/">ホームに戻る</a>
+      </main>
+    `;
   }
 
   if (challengeIndex >= challengeQuestions.length) {
@@ -275,7 +374,7 @@ async function renderChallenge(level: string, mode: AnswerMode): Promise<string>
   const q = challengeQuestions[challengeIndex];
 
   const answerAreaHtml =
-    mode === "input"
+    filter.mode === "input"
       ? `
         <label for="answer-input">読み方をひらがなで入力してください</label>
         <input type="text" id="answer-input" autocomplete="off" autofocus />
@@ -290,7 +389,7 @@ async function renderChallenge(level: string, mode: AnswerMode): Promise<string>
   return `
     ${renderHeader()}
     <main>
-      <h1>チャレンジコース（${escapeHtml(level)}級）</h1>
+      <h1>チャレンジコース</h1>
       <p class="progress">問題 ${challengeIndex + 1} / ${challengeQuestions.length}（正解 ${challengeScore}問）</p>
       <p class="prompt">${escapeHtml(q.prompt)}</p>
       <form id="challenge-form">
@@ -302,14 +401,16 @@ async function renderChallenge(level: string, mode: AnswerMode): Promise<string>
   `;
 }
 
-function attachChallengeEvents(level: string, mode: AnswerMode): void {
+function attachChallengeEvents(filter: ChallengeFilter): void {
   if (!currentUser) return;
+
+  if (challengeQuestions.length === 0) return;
 
   if (challengeIndex >= challengeQuestions.length) {
     document.querySelector("#retry-btn")?.addEventListener("click", () => {
       challengeQuestions = [];
-      lastChallengeLevel = null;
-      navigate(`/challenge?level=${level}&mode=${mode}`);
+      lastChallengeQuery = null;
+      navigate(`/challenge?${challengeHashParams(filter).toString()}`);
       render();
     });
     return;
@@ -322,7 +423,7 @@ function attachChallengeEvents(level: string, mode: AnswerMode): void {
     e.preventDefault();
 
     let answer: string | null = null;
-    if (mode === "input") {
+    if (filter.mode === "input") {
       const input = document.querySelector<HTMLInputElement>("#answer-input");
       answer = input?.value.trim() || null;
       if (!answer) {
@@ -506,6 +607,7 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
           <tr data-id="${q.id}">
             <td>${q.id}</td>
             <td>${escapeHtml(q.character)}（${q.level}級）</td>
+            <td>${q.difficulty}</td>
             <td><input class="f-type" value="${escapeHtml(q.type)}" style="width:6em" /></td>
             <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" style="width:100%" /></td>
             <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" style="width:6em" /></td>
@@ -534,7 +636,7 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
         <p>${questions.length}件</p>
         <table class="kanji-table admin-table">
           <thead>
-            <tr><th>ID</th><th>漢字</th><th>種別</th><th>問題文</th><th>正解</th><th>選択肢</th><th>許容する読み</th><th></th></tr>
+            <tr><th>ID</th><th>漢字</th><th>難易度</th><th>種別</th><th>問題文</th><th>正解</th><th>選択肢</th><th>許容する読み</th><th></th></tr>
           </thead>
           <tbody id="admin-question-rows">${rows}</tbody>
         </table>
@@ -872,11 +974,16 @@ async function render(): Promise<void> {
   }
 
   if (path === "/challenge") {
-    const level = params.get("level") || "10";
-    const mode: AnswerMode = params.get("mode") === "input" ? "input" : "choice";
-    app.innerHTML = await renderChallenge(level, mode);
+    const filter: ChallengeFilter = {
+      levels: params.get("levels") || "",
+      tagIds: params.get("tagIds") || "",
+      difficultyMin: params.get("difficultyMin") || "1",
+      difficultyMax: params.get("difficultyMax") || "10",
+      mode: params.get("mode") === "input" ? "input" : "choice",
+    };
+    app.innerHTML = await renderChallenge(filter);
     attachHeaderEvents();
-    attachChallengeEvents(level, mode);
+    attachChallengeEvents(filter);
     return;
   }
 
@@ -900,7 +1007,7 @@ async function render(): Promise<void> {
     return;
   }
 
-  app.innerHTML = renderHome();
+  app.innerHTML = await renderHome();
   attachHeaderEvents();
   attachHomeEvents();
 }

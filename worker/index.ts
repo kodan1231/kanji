@@ -25,6 +25,12 @@ interface TagRef {
 const SESSION_COOKIE = "session_token";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // 30日
 
+// 全ユーザー正答率から内部難易度(1〜10)を算出する式。
+// 回答実績がまだない問題は正答率0.5(中間)とみなす。
+// 正答率が高いほど難易度は低く(易しく)、正答率が低いほど難易度は高く(難しく)なる。
+const DIFFICULTY_EXPR =
+  "(10 - MIN(9, CAST(COALESCE((SELECT AVG(a.is_correct) FROM attempts a WHERE a.question_id = q.id), 0.5) * 10 AS INTEGER)))";
+
 async function pbkdf2(password: string, salt: Uint8Array): Promise<ArrayBuffer> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -101,7 +107,6 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
-// タグ名の配列から、既存タグはそのIDを使い、存在しないタグ名は新規作成してIDを返す
 async function resolveTagIds(env: Env, tagNames: string[]): Promise<number[]> {
   const ids: number[] = [];
   for (const rawName of tagNames) {
@@ -118,7 +123,6 @@ async function resolveTagIds(env: Env, tagNames: string[]): Promise<number[]> {
   return ids;
 }
 
-// 指定した漢字IDに紐づくタグを、渡されたtagIdsの内容で置き換える
 async function setKanjiTags(env: Env, kanjiId: number, tagIds: number[]): Promise<void> {
   await env.DB.prepare("DELETE FROM kanji_tags WHERE kanji_id = ?").bind(kanjiId).run();
   for (const tagId of tagIds) {
@@ -129,7 +133,6 @@ async function setKanjiTags(env: Env, kanjiId: number, tagIds: number[]): Promis
   }
 }
 
-// 複数の漢字IDに対するタグを一括取得し、kanjiId -> タグ配列 のマップを返す
 async function getTagsForKanjiIds(env: Env, kanjiIds: number[]): Promise<Map<number, TagRef[]>> {
   const map = new Map<number, TagRef[]>();
   if (kanjiIds.length === 0) return map;
@@ -194,22 +197,65 @@ export default {
       return jsonResponse({ status: "ok", sample: result });
     }
 
+    if (pathname === "/api/tags" && method === "GET") {
+      const { results } = await env.DB.prepare("SELECT id, name FROM tags ORDER BY name").all<TagRef>();
+      return jsonResponse({ tags: results });
+    }
+
     if (pathname === "/api/questions/challenge") {
-      const level = url.searchParams.get("level");
-      if (!level) {
-        return jsonResponse({ error: "level is required" }, { status: 400 });
+      const levelsParam = url.searchParams.get("levels") || url.searchParams.get("level");
+      const tagsParam = url.searchParams.get("tagIds");
+      const difficultyMinParam = url.searchParams.get("difficultyMin");
+      const difficultyMaxParam = url.searchParams.get("difficultyMax");
+
+      const levels = levelsParam
+        ? levelsParam
+            .split(",")
+            .map((s) => Number(s.trim()))
+            .filter((n) => !isNaN(n))
+        : [];
+      const tagIds = tagsParam
+        ? tagsParam
+            .split(",")
+            .map((s) => Number(s.trim()))
+            .filter((n) => !isNaN(n))
+        : [];
+      const minD = difficultyMinParam ? Number(difficultyMinParam) : 1;
+      const maxD = difficultyMaxParam ? Number(difficultyMaxParam) : 10;
+
+      let innerQuery = `
+        SELECT DISTINCT q.id, q.kanji_id, q.type, q.prompt, q.choices, k.level,
+          ${DIFFICULTY_EXPR} AS difficulty
+        FROM questions q
+        JOIN kanji k ON q.kanji_id = k.id
+      `;
+      const params: (string | number)[] = [];
+
+      if (tagIds.length > 0) {
+        const placeholders = tagIds.map(() => "?").join(",");
+        innerQuery += ` JOIN kanji_tags kt ON kt.kanji_id = k.id AND kt.tag_id IN (${placeholders})`;
+        params.push(...tagIds);
       }
+
+      innerQuery += " WHERE 1=1";
+      if (levels.length > 0) {
+        const placeholders = levels.map(() => "?").join(",");
+        innerQuery += ` AND k.level IN (${placeholders})`;
+        params.push(...levels);
+      }
+
+      const outerQuery = `
+        SELECT * FROM (${innerQuery}) sub
+        WHERE difficulty BETWEEN ? AND ?
+        ORDER BY RANDOM()
+        LIMIT 10
+      `;
+      params.push(minD, maxD);
+
       const { results } = await env.DB
-        .prepare(
-          `SELECT q.id, q.kanji_id, q.type, q.prompt, q.choices
-           FROM questions q
-           JOIN kanji k ON q.kanji_id = k.id
-           WHERE k.level = ?
-           ORDER BY RANDOM()
-           LIMIT 10`
-        )
-        .bind(Number(level))
-        .all<QuestionRow>();
+        .prepare(outerQuery)
+        .bind(...params)
+        .all<QuestionRow & { difficulty: number; level: number }>();
 
       const questions = results.map((row) => ({
         id: row.id,
@@ -217,6 +263,7 @@ export default {
         type: row.type,
         prompt: row.prompt,
         choices: row.choices ? JSON.parse(row.choices) : null,
+        difficulty: row.difficulty,
       }));
       return jsonResponse({ questions });
     }
@@ -551,7 +598,6 @@ export default {
         }
 
         if (method === "DELETE") {
-          // 関連する問題・回答履歴・タグ付けも合わせて削除（外部キーの不整合を防ぐため）
           await env.DB
             .prepare(
               `DELETE FROM attempts WHERE question_id IN (SELECT id FROM questions WHERE kanji_id = ?)`
@@ -571,7 +617,8 @@ export default {
         const level = url.searchParams.get("level");
         const kanjiId = url.searchParams.get("kanjiId");
         let query = `
-          SELECT q.id, q.kanji_id, k.character, k.level, q.type, q.prompt, q.correct_answer, q.choices, q.accepted_answers
+          SELECT q.id, q.kanji_id, k.character, k.level, q.type, q.prompt, q.correct_answer, q.choices, q.accepted_answers,
+            ${DIFFICULTY_EXPR} AS difficulty
           FROM questions q
           JOIN kanji k ON q.kanji_id = k.id
           WHERE 1=1
@@ -599,6 +646,7 @@ export default {
             correct_answer: string;
             choices: string | null;
             accepted_answers: string | null;
+            difficulty: number;
           }>();
 
         const questions = results.map((row) => ({
@@ -611,6 +659,7 @@ export default {
           correctAnswer: row.correct_answer,
           choices: row.choices ? JSON.parse(row.choices) : null,
           acceptedAnswers: row.accepted_answers ? JSON.parse(row.accepted_answers) : null,
+          difficulty: row.difficulty,
         }));
         return jsonResponse({ questions });
       }
