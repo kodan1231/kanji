@@ -497,3 +497,14 @@ h2 {
   margin-bottom: 4px;
   font-size: 0.95rem;
 }
+
+/* チャレンジ問題の表示（漢字部分の強調） */
+.q-number {
+  color: var(--color-indigo);
+  font-weight: 500;
+}
+
+.q-kanji {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+}

@@ -138,6 +138,12 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+// prompt文字列（例:「花」の読み方として正しいものはどれですか？）から「」内の表示部分だけを取り出す
+function extractDisplayText(prompt: string): string {
+  const match = prompt.match(/「(.+?)」/);
+  return match ? match[1] : prompt;
+}
+
 // ---------- ホーム画面 ----------
 
 async function renderHome(): Promise<string> {
@@ -362,9 +368,10 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
       .map((q, i) => {
         const r = challengeResults[i];
         const cls = r.correct ? "correct" : "incorrect";
+        const displayText = extractDisplayText(q.prompt);
         return `
           <div class="result-item ${cls}">
-            <p class="prompt">${i + 1}. ${escapeHtml(q.prompt)}</p>
+            <p class="prompt"><span class="q-number">${i + 1}.</span> <span class="q-kanji">${escapeHtml(displayText)}</span></p>
             <p class="message ${cls}">${
               r.correct ? "正解！" : `不正解。正解は「${escapeHtml(r.correctAnswer)}」でした。`
             }</p>
@@ -388,14 +395,17 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
     `;
   }
 
+  const instructionText =
+    filter.mode === "input"
+      ? "次の10問について、読み方をひらがなで入力してください。"
+      : "次の10問について、正しい読み方を選んでください。";
+
   const questionsHtml = challengeQuestions
     .map((q, i) => {
+      const displayText = extractDisplayText(q.prompt);
       const answerArea =
         filter.mode === "input"
-          ? `
-            <label for="answer-input-${i}">読み方をひらがなで入力してください</label>
-            <input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />
-          `
+          ? `<input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />`
           : (q.choices || [])
               .map(
                 (c) =>
@@ -405,7 +415,7 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
 
       return `
         <div class="question-block">
-          <p class="prompt">${i + 1}. ${escapeHtml(q.prompt)}</p>
+          <p class="prompt"><span class="q-number">${i + 1}.</span> <span class="q-kanji">${escapeHtml(displayText)}</span></p>
           ${answerArea}
         </div>
       `;
@@ -416,7 +426,7 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
     ${renderHeader()}
     <main>
       <h1>チャレンジコース</h1>
-      <p class="progress">全${challengeQuestions.length}問</p>
+      <p class="progress">${instructionText}</p>
       <form id="challenge-form">
         ${questionsHtml}
         <button type="submit" class="primary-btn">まとめて回答する</button>
