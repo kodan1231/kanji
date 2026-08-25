@@ -38,6 +38,14 @@ body {
   padding: 0 20px 64px;
 }
 
+.admin-main {
+  max-width: none;
+}
+
+#app:has(.admin-main) {
+  max-width: 1400px;
+}
+
 a {
   color: var(--color-indigo);
 }
@@ -114,6 +122,13 @@ h1 {
   letter-spacing: 0.02em;
 }
 
+h2 {
+  font-family: var(--font-display);
+  color: var(--color-indigo-dark);
+  font-size: 1.15rem;
+  margin: 28px 0 12px;
+}
+
 /* ボタン共通 */
 .primary-btn,
 button[type="submit"] {
@@ -139,19 +154,6 @@ button[type="submit"]:hover {
   flex-wrap: wrap;
 }
 
-.home-actions button {
-  background: var(--color-indigo);
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 14px 28px;
-  font-size: 1rem;
-}
-
-.home-actions button:hover {
-  background: var(--color-indigo-dark);
-}
-
 label {
   display: block;
   margin-bottom: 8px;
@@ -160,7 +162,8 @@ label {
 
 select,
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+input[type="number"] {
   font-family: var(--font-body);
   font-size: 1rem;
   padding: 10px 12px;
@@ -223,24 +226,6 @@ input[type="password"] {
   margin-bottom: 24px;
 }
 
-.choice {
-  display: block;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  padding: 12px 16px;
-  margin-bottom: 10px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.choice:hover {
-  border-color: var(--color-indigo);
-}
-
-.choice input {
-  margin-right: 10px;
-}
-
 .message {
   font-weight: 500;
   min-height: 1.4em;
@@ -254,52 +239,149 @@ input[type="password"] {
   color: var(--color-hanko);
 }
 
-/* スタディコース: 検索フォーム */
-.study-form {
-  display: flex;
-  gap: 16px;
-  align-items: flex-end;
-  flex-wrap: wrap;
+/* タグ入力＋サジェスト */
+.tag-input-wrapper {
+  position: relative;
+  max-width: 480px;
   margin-bottom: 20px;
 }
 
-.study-form label {
-  margin-bottom: 0;
+.tag-input-wrapper input {
+  max-width: none;
 }
 
-.study-form button {
-  background: var(--color-indigo);
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 10px 20px;
-  height: fit-content;
-}
-
-/* スタディコース: 一覧テーブル */
-.kanji-table {
-  width: 100%;
-  border-collapse: collapse;
+.tag-suggestions {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
   background: #fff;
+  border: 1px solid var(--color-line);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  z-index: 5;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
-.kanji-table th,
-.kanji-table td {
-  border-bottom: 1px solid var(--color-line);
-  padding: 10px 12px;
-  text-align: left;
+.tag-suggestions.open {
+  display: block;
 }
 
-.kanji-table th {
-  background: var(--color-indigo);
+.tag-suggestion {
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.tag-suggestion:hover {
+  background: var(--color-bg);
+}
+
+/* スパイス難易度セレクター */
+.spice-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.spice-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 18px;
+  border: 2px solid var(--color-line);
+  border-radius: 999px;
+  background: #fff;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin: 0;
+}
+
+.spice-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.spice-option:hover {
+  border-color: var(--color-indigo);
+}
+
+.spice-option.selected {
   color: #fff;
+  border-color: transparent;
+}
+
+.spice-option.spice-mild.selected {
+  background: #e8a33d;
+}
+.spice-option.spice-medium.selected {
+  background: #d97b2b;
+}
+.spice-option.spice-hot.selected {
+  background: #c1272d;
+}
+.spice-option.spice-veryhot.selected {
+  background: #971b21;
+}
+.spice-option.spice-extreme.selected {
+  background: #5c0f13;
+}
+
+/* チャレンジコース一括表示 */
+.question-block {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.question-block .prompt {
+  text-align: left;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.question-block input[type="text"] {
+  max-width: 240px;
+}
+
+.q-number {
+  color: var(--color-indigo);
   font-weight: 500;
 }
 
-.kanji-char {
+.q-kanji {
   font-family: var(--font-display);
-  font-size: 1.4rem;
-  width: 60px;
+  font-size: 1.3rem;
+}
+
+.result-item {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: 10px 16px;
+  margin-bottom: 8px;
+}
+
+.result-item.correct {
+  border-left-color: var(--color-indigo);
+}
+
+.result-item.incorrect {
+  border-left-color: var(--color-hanko);
+}
+
+.result-item .prompt {
+  text-align: left;
+  margin-bottom: 4px;
+  font-size: 0.95rem;
 }
 
 .auth-form-wrapper {
@@ -324,12 +406,6 @@ input[type="password"] {
 
 .auth-actions button[type="button"]:hover {
   background: var(--color-bg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-  }
 }
 
 /* 管理画面 */
@@ -357,18 +433,98 @@ input[type="password"] {
   font-weight: 700;
 }
 
-.admin-table {
-  font-size: 0.85rem;
-  overflow-x: auto;
-  display: block;
-  white-space: nowrap;
+.admin-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 
-.admin-table input {
+.admin-toolbar .study-form {
+  margin-bottom: 0;
+}
+
+.study-form {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.study-form label {
+  margin-bottom: 0;
+}
+
+.study-form select {
+  max-width: 160px;
+}
+
+.study-form button {
+  background: var(--color-indigo);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 20px;
+  height: fit-content;
+}
+
+.kanji-table {
   width: 100%;
-  min-width: 60px;
-  padding: 4px 6px;
-  font-size: 0.85rem;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.kanji-table th,
+.kanji-table td {
+  border-bottom: 1px solid var(--color-line);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.kanji-table th {
+  background: var(--color-indigo);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* 管理画面の表：常に横スクロール表示、10行程度で縦スクロール、ヘッダー固定 */
+.admin-table-wrapper {
+  overflow-x: scroll;
+  overflow-y: auto;
+  max-height: 520px;
+  border: 1px solid var(--color-line);
+  margin-bottom: 16px;
+}
+
+.admin-table-wrapper-small {
+  max-height: 320px;
+}
+
+.admin-table-wrapper .admin-table {
+  min-width: 1500px;
+  font-size: 0.9rem;
+}
+
+#admin-tag-list-table {
+  min-width: 500px;
+}
+
+.admin-table-wrapper thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.admin-table input,
+.admin-table select {
+  width: 100%;
+  min-width: 90px;
+  padding: 6px 8px;
+  font-size: 0.9rem;
+  max-width: none;
 }
 
 .admin-table td {
@@ -382,6 +538,7 @@ input[type="password"] {
   border: 1px solid var(--color-line);
   background: #fff;
   border-radius: 3px;
+  white-space: nowrap;
 }
 
 .admin-table .delete-kanji-btn,
@@ -390,15 +547,23 @@ input[type="password"] {
   border-color: var(--color-hanko);
 }
 
+/* 新規登録ダイアログ */
+dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  max-width: 520px;
+  width: 90%;
+}
+
+dialog::backdrop {
+  background: rgba(43, 43, 40, 0.5);
+}
+
 .admin-new-form {
-  background: #fff;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  padding: 20px;
+  padding: 24px 28px;
   display: grid;
   gap: 14px;
-  max-width: 480px;
-  margin-bottom: 24px;
 }
 
 .admin-new-form label {
@@ -409,102 +574,23 @@ input[type="password"] {
   max-width: none;
 }
 
-h2 {
-  font-family: var(--font-display);
-  color: var(--color-indigo-dark);
-  font-size: 1.2rem;
-  margin: 32px 0 16px;
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
 }
 
-/* ホーム画面のフィルタUI */
-.filter-group {
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
+.dialog-actions button[type="button"] {
   background: #fff;
-}
-
-.filter-group legend {
-  padding: 0 6px;
-  font-weight: 500;
-  color: var(--color-indigo);
-}
-
-.checkbox-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 4px 12px 4px 0;
-  font-weight: 400;
-}
-
-.checkbox-item input {
-  margin: 0;
-}
-
-.inline-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 16px 0 0;
-  font-weight: 400;
-}
-
-.inline-label input[type="number"] {
-  width: 4em;
-  max-width: 4em;
-}
-
-/* チャレンジコース一括表示 */
-.question-block {
-  background: #fff;
+  color: var(--color-ink);
   border: 1px solid var(--color-line);
-  border-radius: 6px;
-  padding: 16px 20px;
-  margin-bottom: 16px;
-}
-
-.question-block .prompt {
-  text-align: left;
-  font-weight: 500;
-  margin-bottom: 12px;
-}
-
-.question-block input[type="text"] {
-  max-width: 240px;
-}
-
-.result-item {
-  background: #fff;
-  border: 1px solid var(--color-line);
-  border-left-width: 4px;
   border-radius: 4px;
-  padding: 10px 16px;
-  margin-bottom: 8px;
+  padding: 10px 20px;
 }
 
-.result-item.correct {
-  border-left-color: var(--color-indigo);
-}
-
-.result-item.incorrect {
-  border-left-color: var(--color-hanko);
-}
-
-.result-item .prompt {
-  text-align: left;
-  margin-bottom: 4px;
-  font-size: 0.95rem;
-}
-
-/* チャレンジ問題の表示（漢字部分の強調） */
-.q-number {
-  color: var(--color-indigo);
-  font-weight: 500;
-}
-
-.q-kanji {
-  font-family: var(--font-display);
-  font-size: 1.3rem;
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }

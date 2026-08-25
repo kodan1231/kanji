@@ -1,24 +1,19 @@
 import "./style.css";
 
 type User = { id: number; username: string; isAdmin: boolean } | null;
-type AnswerMode = "choice" | "input";
 type AdminTab = "kanji" | "questions";
+type SpiceLevel = "mild" | "medium" | "hot" | "veryhot" | "extreme";
 
 interface ChallengeQuestion {
   id: number;
   kanjiId: number;
   type: string;
   prompt: string;
-  choices: string[] | null;
-  difficulty?: number;
 }
 
 interface ChallengeFilter {
-  levels: string;
-  tagIds: string;
-  difficultyMin: string;
-  difficultyMax: string;
-  mode: AnswerMode;
+  tags: string;
+  spice: SpiceLevel;
 }
 
 interface KanjiRow {
@@ -50,12 +45,21 @@ interface AdminQuestionRow {
   type: string;
   prompt: string;
   correctAnswer: string;
-  choices: string[] | null;
   acceptedAnswers: string[] | null;
   difficulty: number;
 }
 
+const SPICE_LABELS: Record<SpiceLevel, string> = {
+  mild: "甘口",
+  medium: "中辛",
+  hot: "辛口",
+  veryhot: "大辛",
+  extreme: "激辛",
+};
+const SPICE_ORDER: SpiceLevel[] = ["mild", "medium", "hot", "veryhot", "extreme"];
+
 let currentUser: User = null;
+let allTagsCache: TagRef[] = [];
 
 let challengeQuestions: ChallengeQuestion[] = [];
 let challengeSubmitted = false;
@@ -115,7 +119,6 @@ function renderHeader(): string {
     <header class="app-header">
       <nav>
         <a href="#/">ホーム</a>
-        <a href="#/study">スタディ</a>
         ${adminLink}
       </nav>
       <div class="auth-status">${authArea}</div>
@@ -138,105 +141,144 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-// prompt文字列（例:「花」の読み方として正しいものはどれですか？）から「」内の表示部分だけを取り出す
 function extractDisplayText(prompt: string): string {
   const match = prompt.match(/「(.+?)」/);
   return match ? match[1] : prompt;
 }
 
+// ---------- タグ入力（カンマ区切り＋サジェスト） ----------
+
+async function ensureTagsCache(): Promise<TagRef[]> {
+  if (allTagsCache.length === 0) {
+    const data = await apiFetch("/api/tags");
+    allTagsCache = data.tags;
+  }
+  return allTagsCache;
+}
+
+function setupTagAutocomplete(inputId: string, suggestBoxId: string): void {
+  const input = document.querySelector<HTMLInputElement>(`#${inputId}`);
+  const box = document.querySelector<HTMLDivElement>(`#${suggestBoxId}`);
+  if (!input || !box) return;
+
+  const renderSuggestions = () => {
+    const value = input.value;
+    const lastCommaIndex = value.lastIndexOf(",");
+    const currentSegment = value.slice(lastCommaIndex + 1).trim();
+
+    if (!currentSegment) {
+      box.innerHTML = "";
+      box.classList.remove("open");
+      return;
+    }
+
+    const matches = allTagsCache
+      .filter((t) => t.name.includes(currentSegment))
+      .slice(0, 8);
+
+    if (matches.length === 0) {
+      box.innerHTML = "";
+      box.classList.remove("open");
+      return;
+    }
+
+    box.innerHTML = matches
+      .map((t) => `<div class="tag-suggestion" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</div>`)
+      .join("");
+    box.classList.add("open");
+  };
+
+  input.addEventListener("input", renderSuggestions);
+  input.addEventListener("focus", renderSuggestions);
+  input.addEventListener("blur", () => {
+    setTimeout(() => box.classList.remove("open"), 150);
+  });
+
+  box.addEventListener("mousedown", (e) => {
+    const target = e.target as HTMLElement;
+    const name = target.dataset.name;
+    if (!name) return;
+    const value = input.value;
+    const lastCommaIndex = value.lastIndexOf(",");
+    const prefix = lastCommaIndex >= 0 ? value.slice(0, lastCommaIndex + 1) + " " : "";
+    input.value = `${prefix}${name}, `;
+    box.classList.remove("open");
+    input.focus();
+  });
+}
+
+// ---------- スパイス難易度セレクター ----------
+
+function spiceSelectorHtml(selected: SpiceLevel): string {
+  return `
+    <div class="spice-selector">
+      ${SPICE_ORDER.map(
+        (level) => `
+          <label class="spice-option spice-${level} ${level === selected ? "selected" : ""}">
+            <input type="radio" name="spice" value="${level}" ${level === selected ? "checked" : ""} />
+            <span>${SPICE_LABELS[level]}</span>
+          </label>
+        `
+      ).join("")}
+    </div>
+  `;
+}
+
+function attachSpiceSelectorEvents(): void {
+  const options = document.querySelectorAll<HTMLLabelElement>(".spice-option");
+  options.forEach((opt) => {
+    opt.addEventListener("click", () => {
+      options.forEach((o) => o.classList.remove("selected"));
+      opt.classList.add("selected");
+    });
+  });
+}
+
 // ---------- ホーム画面 ----------
 
 async function renderHome(): Promise<string> {
-  const tagsData = await apiFetch("/api/tags");
-  const tags: TagRef[] = tagsData.tags;
-
-  const tagCheckboxes = tags.length
-    ? tags
-        .map(
-          (t) =>
-            `<label class="checkbox-item"><input type="checkbox" class="challenge-tag" value="${t.id}" /> ${escapeHtml(t.name)}</label>`
-        )
-        .join("")
-    : "<p>登録されているタグはまだありません。</p>";
+  await ensureTagsCache();
 
   return `
     ${renderHeader()}
     <main>
-      <h1>漢字マス</h1>
       <div class="kanji-cell">漢</div>
 
-      <h2>チャレンジコースの出題条件</h2>
-      <fieldset class="filter-group">
-        <legend>級（複数選択可。未選択の場合は全級対象）</legend>
-        <label class="checkbox-item"><input type="checkbox" class="challenge-level" value="10" /> 10級</label>
-        <label class="checkbox-item"><input type="checkbox" class="challenge-level" value="9" /> 9級</label>
-        <label class="checkbox-item"><input type="checkbox" class="challenge-level" value="8" /> 8級</label>
-      </fieldset>
+      <h2>タグ（カンマ区切り。未入力で全タグ対象）</h2>
+      <div class="tag-input-wrapper">
+        <input type="text" id="challenge-tags-input" placeholder="例: 動物, 数字" autocomplete="off" />
+        <div class="tag-suggestions" id="challenge-tags-suggest"></div>
+      </div>
 
-      <fieldset class="filter-group">
-        <legend>タグ（複数選択可。未選択の場合は全タグ対象）</legend>
-        ${tagCheckboxes}
-      </fieldset>
-
-      <fieldset class="filter-group">
-        <legend>難易度（内部10段階。正答率が低いほど難しい）</legend>
-        <label class="inline-label">最小
-          <input type="number" id="difficulty-min" min="1" max="10" value="1" />
-        </label>
-        <label class="inline-label">最大
-          <input type="number" id="difficulty-max" min="1" max="10" value="10" />
-        </label>
-      </fieldset>
-
-      <label for="mode-select">回答形式</label>
-      <select id="mode-select">
-        <option value="choice">4択で選ぶ</option>
-        <option value="input">文字を入力する</option>
-      </select>
+      <h2>難易度</h2>
+      ${spiceSelectorHtml("medium")}
 
       <div class="home-actions">
         <button id="challenge-btn" class="primary-btn">チャレンジコースへ</button>
-      </div>
-
-      <h2>スタディコース</h2>
-      <label for="home-study-level">級</label>
-      <select id="home-study-level">
-        <option value="10">10級（小学1年相当）</option>
-        <option value="9">9級（小学2年相当）</option>
-        <option value="8">8級（小学3年相当）</option>
-      </select>
-      <div class="home-actions">
-        <button id="study-btn">スタディコースへ</button>
       </div>
     </main>
   `;
 }
 
 function attachHomeEvents(): void {
+  setupTagAutocomplete("challenge-tags-input", "challenge-tags-suggest");
+  attachSpiceSelectorEvents();
+
   document.querySelector("#challenge-btn")?.addEventListener("click", () => {
-    const levels = Array.from(document.querySelectorAll<HTMLInputElement>(".challenge-level:checked")).map(
-      (el) => el.value
-    );
-    const tagIds = Array.from(document.querySelectorAll<HTMLInputElement>(".challenge-tag:checked")).map(
-      (el) => el.value
-    );
-    const difficultyMin = document.querySelector<HTMLInputElement>("#difficulty-min")!.value || "1";
-    const difficultyMax = document.querySelector<HTMLInputElement>("#difficulty-max")!.value || "10";
-    const mode = document.querySelector<HTMLSelectElement>("#mode-select")!.value;
+    const tagsRaw = document.querySelector<HTMLInputElement>("#challenge-tags-input")!.value;
+    const tags = tagsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .join(",");
+    const spiceInput = document.querySelector<HTMLInputElement>('input[name="spice"]:checked');
+    const spice = (spiceInput?.value as SpiceLevel) || "medium";
 
     const params = new URLSearchParams();
-    if (levels.length > 0) params.set("levels", levels.join(","));
-    if (tagIds.length > 0) params.set("tagIds", tagIds.join(","));
-    params.set("difficultyMin", difficultyMin);
-    params.set("difficultyMax", difficultyMax);
-    params.set("mode", mode);
+    if (tags) params.set("tags", tags);
+    params.set("spice", spice);
 
     navigate(`/challenge?${params.toString()}`);
-  });
-
-  document.querySelector("#study-btn")?.addEventListener("click", () => {
-    const level = document.querySelector<HTMLSelectElement>("#home-study-level")!.value;
-    navigate(`/study?level=${level}`);
   });
 }
 
@@ -312,21 +354,13 @@ function attachLoginEvents(): void {
 // ---------- チャレンジコース ----------
 
 function challengeQueryKey(filter: ChallengeFilter): string {
-  return `${filter.levels}|${filter.tagIds}|${filter.difficultyMin}|${filter.difficultyMax}`;
+  return `${filter.tags}|${filter.spice}`;
 }
 
 function challengeParams(filter: ChallengeFilter): URLSearchParams {
   const params = new URLSearchParams();
-  if (filter.levels) params.set("levels", filter.levels);
-  if (filter.tagIds) params.set("tagIds", filter.tagIds);
-  params.set("difficultyMin", filter.difficultyMin);
-  params.set("difficultyMax", filter.difficultyMax);
-  return params;
-}
-
-function challengeHashParams(filter: ChallengeFilter): URLSearchParams {
-  const params = challengeParams(filter);
-  params.set("mode", filter.mode);
+  if (filter.tags) params.set("tags", filter.tags);
+  params.set("spice", filter.spice);
   return params;
 }
 
@@ -356,7 +390,7 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
       ${renderHeader()}
       <main>
         <h1>チャレンジコース</h1>
-        <p>指定した条件に合う問題が見つかりませんでした。条件を変えて試してください。</p>
+        <p>指定した条件（タグ: ${filter.tags ? escapeHtml(filter.tags) : "指定なし"} / 難易度: ${SPICE_LABELS[filter.spice]}）に合う問題が見つかりませんでした。条件を変えて試してください。</p>
         <a href="#/">ホームに戻る</a>
       </main>
     `;
@@ -395,28 +429,13 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
     `;
   }
 
-  const instructionText =
-    filter.mode === "input"
-      ? "次の10問について、読み方をひらがなで入力してください。"
-      : "次の10問について、正しい読み方を選んでください。";
-
   const questionsHtml = challengeQuestions
     .map((q, i) => {
       const displayText = extractDisplayText(q.prompt);
-      const answerArea =
-        filter.mode === "input"
-          ? `<input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />`
-          : (q.choices || [])
-              .map(
-                (c) =>
-                  `<label class="choice"><input type="radio" name="choice-${i}" value="${escapeHtml(c)}" /> ${escapeHtml(c)}</label>`
-              )
-              .join("");
-
       return `
         <div class="question-block">
           <p class="prompt"><span class="q-number">${i + 1}.</span> <span class="q-kanji">${escapeHtml(displayText)}</span></p>
-          ${answerArea}
+          <input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />
         </div>
       `;
     })
@@ -426,7 +445,7 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
     ${renderHeader()}
     <main>
       <h1>チャレンジコース</h1>
-      <p class="progress">${instructionText}</p>
+      <p class="progress">次の10問について、読み方をひらがなで入力してください。</p>
       <form id="challenge-form">
         ${questionsHtml}
         <button type="submit" class="primary-btn">まとめて回答する</button>
@@ -446,7 +465,7 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
       lastChallengeQuery = null;
       challengeSubmitted = false;
       challengeResults = [];
-      navigate(`/challenge?${challengeHashParams(filter).toString()}`);
+      navigate(`/challenge?${challengeParams(filter).toString()}`);
       render();
     });
     return;
@@ -459,13 +478,8 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
     e.preventDefault();
 
     const answers: (string | null)[] = challengeQuestions.map((_, i) => {
-      if (filter.mode === "input") {
-        const input = document.querySelector<HTMLInputElement>(`#answer-input-${i}`);
-        return input?.value.trim() || null;
-      } else {
-        const selected = form.querySelector<HTMLInputElement>(`input[name="choice-${i}"]:checked`);
-        return selected?.value || null;
-      }
+      const input = document.querySelector<HTMLInputElement>(`#answer-input-${i}`);
+      return input?.value.trim() || null;
     });
 
     if (answers.some((a) => !a)) {
@@ -498,67 +512,6 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
       feedback.classList.add("incorrect");
       feedback.textContent = `エラー: ${(err as Error).message}`;
     }
-  });
-}
-
-// ---------- スタディコース ----------
-
-async function renderStudy(level: string, q: string): Promise<string> {
-  const params = new URLSearchParams();
-  if (level) params.set("level", level);
-  if (q) params.set("q", q);
-
-  const data = await apiFetch(`/api/kanji/study?${params.toString()}`);
-  const kanjiList: KanjiRow[] = data.kanji;
-
-  const rows = kanjiList
-    .map(
-      (k) => `
-        <tr>
-          <td class="kanji-char">${escapeHtml(k.character)}</td>
-          <td>${k.level}級</td>
-          <td>${escapeHtml(k.reading_on ?? "")}</td>
-          <td>${escapeHtml(k.reading_kun ?? "")}</td>
-        </tr>
-      `
-    )
-    .join("");
-
-  return `
-    ${renderHeader()}
-    <main>
-      <h1>スタディコース</h1>
-      <form id="study-form" class="study-form">
-        <label>級
-          <select id="study-level">
-            <option value="10" ${level === "10" ? "selected" : ""}>10級</option>
-            <option value="9" ${level === "9" ? "selected" : ""}>9級</option>
-            <option value="8" ${level === "8" ? "selected" : ""}>8級</option>
-          </select>
-        </label>
-        <label>検索
-          <input type="text" id="study-q" value="${escapeHtml(q)}" placeholder="漢字・読みで検索" />
-        </label>
-        <button type="submit">検索</button>
-      </form>
-      <p>${kanjiList.length}件</p>
-      <table class="kanji-table">
-        <thead>
-          <tr><th>漢字</th><th>級</th><th>音読み</th><th>訓読み</th></tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </main>
-  `;
-}
-
-function attachStudyEvents(): void {
-  const form = document.querySelector<HTMLFormElement>("#study-form");
-  form?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const level = document.querySelector<HTMLSelectElement>("#study-level")!.value;
-    const q = document.querySelector<HTMLInputElement>("#study-q")!.value;
-    navigate(`/study?level=${level}&q=${encodeURIComponent(q)}`);
   });
 }
 
@@ -638,10 +591,9 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
             <td>${q.id}</td>
             <td>${escapeHtml(q.character)}（${q.level}級）</td>
             <td>${q.difficulty}</td>
-            <td><input class="f-type" value="${escapeHtml(q.type)}" style="width:6em" /></td>
-            <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" style="width:100%" /></td>
-            <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" style="width:6em" /></td>
-            <td><input class="f-choices" value="${escapeHtml((q.choices || []).join(","))}" placeholder="カンマ区切り" /></td>
+            <td><input class="f-type" value="${escapeHtml(q.type)}" /></td>
+            <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" /></td>
+            <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" /></td>
             <td><input class="f-accepted" value="${escapeHtml((q.acceptedAnswers || []).join(","))}" placeholder="カンマ区切り" /></td>
             <td>
               <button class="save-question-btn">保存</button>
@@ -654,45 +606,52 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
 
     return `
       ${renderHeader()}
-      <main>
+      <main class="admin-main">
         <h1>管理画面 — 問題</h1>
         ${tabNav}
-        <form id="admin-filter-form" class="study-form">
-          <label>級
-            <select id="admin-level-filter">${levelFilterOptions(level)}</select>
-          </label>
-          <button type="submit">絞り込み</button>
-        </form>
+        <div class="admin-toolbar">
+          <form id="admin-filter-form" class="study-form">
+            <label>級
+              <select id="admin-level-filter">${levelFilterOptions(level)}</select>
+            </label>
+            <button type="submit">絞り込み</button>
+          </form>
+          <button id="open-new-question-dialog" class="primary-btn">＋ 新規追加</button>
+        </div>
         <p>${questions.length}件</p>
-        <table class="kanji-table admin-table">
-          <thead>
-            <tr><th>ID</th><th>漢字</th><th>難易度</th><th>種別</th><th>問題文</th><th>正解</th><th>選択肢</th><th>許容する読み</th><th></th></tr>
-          </thead>
-          <tbody id="admin-question-rows">${rows}</tbody>
-        </table>
+        <div class="admin-table-wrapper">
+          <table class="kanji-table admin-table">
+            <thead>
+              <tr><th>ID</th><th>漢字</th><th>難易度</th><th>種別</th><th>問題文</th><th>正解</th><th>許容する読み</th><th></th></tr>
+            </thead>
+            <tbody id="admin-question-rows">${rows}</tbody>
+          </table>
+        </div>
 
-        <h2>新規追加</h2>
-        <form id="admin-new-question-form" class="admin-new-form">
-          <label>漢字ID（漢字マスタ一覧のIDを指定）
-            <input type="number" id="new-q-kanji-id" required />
-          </label>
-          <label>種別（reading / writing / radical など）
-            <input type="text" id="new-q-type" value="reading" required />
-          </label>
-          <label>問題文
-            <input type="text" id="new-q-prompt" required />
-          </label>
-          <label>正解
-            <input type="text" id="new-q-correct" required />
-          </label>
-          <label>選択肢（カンマ区切り、任意）
-            <input type="text" id="new-q-choices" />
-          </label>
-          <label>許容する読み（カンマ区切り、任意）
-            <input type="text" id="new-q-accepted" />
-          </label>
-          <button type="submit" class="primary-btn">追加</button>
-        </form>
+        <dialog id="new-question-dialog">
+          <form id="admin-new-question-form" class="admin-new-form">
+            <h2>問題の新規追加</h2>
+            <label>漢字ID（漢字マスタ一覧のIDを指定）
+              <input type="number" id="new-q-kanji-id" required />
+            </label>
+            <label>種別（reading / writing / radical など）
+              <input type="text" id="new-q-type" value="reading" required />
+            </label>
+            <label>問題文
+              <input type="text" id="new-q-prompt" required />
+            </label>
+            <label>正解
+              <input type="text" id="new-q-correct" required />
+            </label>
+            <label>許容する読み（カンマ区切り、任意）
+              <input type="text" id="new-q-accepted" />
+            </label>
+            <div class="dialog-actions">
+              <button type="button" id="cancel-new-question">キャンセル</button>
+              <button type="submit" class="primary-btn">追加</button>
+            </div>
+          </form>
+        </dialog>
         <p id="admin-message" class="message"></p>
       </main>
     `;
@@ -720,12 +679,12 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
         <tr data-id="${k.id}">
           <td>${k.id}</td>
           <td>${entryTypeSelectHtml(k.entry_type, "f-entry-type")}</td>
-          <td><input class="f-character" value="${escapeHtml(k.character)}" style="width:6em" /></td>
-          <td><input class="f-level" type="number" value="${k.level}" style="width:4em" /></td>
+          <td><input class="f-character" value="${escapeHtml(k.character)}" /></td>
+          <td><input class="f-level" type="number" value="${k.level}" /></td>
           <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
           <td><input class="f-kun" value="${escapeHtml(k.reading_kun ?? "")}" /></td>
-          <td><input class="f-radical" value="${escapeHtml(k.radical ?? "")}" style="width:3em" /></td>
-          <td><input class="f-stroke" type="number" value="${k.stroke_count ?? ""}" style="width:4em" /></td>
+          <td><input class="f-radical" value="${escapeHtml(k.radical ?? "")}" /></td>
+          <td><input class="f-stroke" type="number" value="${k.stroke_count ?? ""}" /></td>
           <td><input class="f-meaning" value="${escapeHtml(k.meaning ?? "")}" /></td>
           <td><input class="f-tags" value="${escapeHtml(k.tags.map((t) => t.name).join(","))}" placeholder="カンマ区切り" /></td>
           <td>
@@ -739,78 +698,90 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
 
   return `
     ${renderHeader()}
-    <main>
+    <main class="admin-main">
       <h1>管理画面 — 漢字マスタ</h1>
       ${tabNav}
-      <form id="admin-filter-form" class="study-form">
-        <label>級
-          <select id="admin-level-filter">${levelFilterOptions(level)}</select>
-        </label>
-        <label>種別
-          <select id="admin-entry-type-filter">${entryTypeOptionsHtml(entryType)}</select>
-        </label>
-        <label>タグ
-          <select id="admin-tag-filter">${tagFilterOptions}</select>
-        </label>
-        <button type="submit">絞り込み</button>
-      </form>
+      <div class="admin-toolbar">
+        <form id="admin-filter-form" class="study-form">
+          <label>級
+            <select id="admin-level-filter">${levelFilterOptions(level)}</select>
+          </label>
+          <label>種別
+            <select id="admin-entry-type-filter">${entryTypeOptionsHtml(entryType)}</select>
+          </label>
+          <label>タグ
+            <select id="admin-tag-filter">${tagFilterOptions}</select>
+          </label>
+          <button type="submit">絞り込み</button>
+        </form>
+        <button id="open-new-kanji-dialog" class="primary-btn">＋ 新規追加</button>
+      </div>
       <p>${kanjiList.length}件</p>
-      <table class="kanji-table admin-table">
-        <thead>
-          <tr><th>ID</th><th>種別</th><th>文字</th><th>級</th><th>音読み</th><th>訓読み</th><th>部首</th><th>画数</th><th>意味</th><th>タグ</th><th></th></tr>
-        </thead>
-        <tbody id="admin-kanji-rows">${rows}</tbody>
-      </table>
+      <div class="admin-table-wrapper">
+        <table class="kanji-table admin-table">
+          <thead>
+            <tr><th>ID</th><th>種別</th><th>文字</th><th>級</th><th>音読み</th><th>訓読み</th><th>部首</th><th>画数</th><th>意味</th><th>タグ</th><th></th></tr>
+          </thead>
+          <tbody id="admin-kanji-rows">${rows}</tbody>
+        </table>
+      </div>
 
-      <h2>新規追加</h2>
-      <form id="admin-new-kanji-form" class="admin-new-form">
-        <label>種別
-          ${entryTypeSelectHtml("kanji", "new-k-entry-type")}
-        </label>
-        <label>文字（1文字の漢字、熟語、四字熟語など）
-          <input type="text" id="new-k-character" required />
-        </label>
-        <label>級
-          <input type="number" id="new-k-level" required style="max-width:6em" />
-        </label>
-        <label>音読み
-          <input type="text" id="new-k-on" />
-        </label>
-        <label>訓読み
-          <input type="text" id="new-k-kun" />
-        </label>
-        <label>部首
-          <input type="text" id="new-k-radical" style="max-width:6em" />
-        </label>
-        <label>画数
-          <input type="number" id="new-k-stroke" style="max-width:6em" />
-        </label>
-        <label>意味
-          <input type="text" id="new-k-meaning" />
-        </label>
-        <label>タグ（カンマ区切り、任意。新しいタグ名は自動作成されます）
-          <input type="text" id="new-k-tags" placeholder="例: 動物,水中生物" />
-        </label>
-        <button type="submit" class="primary-btn">追加</button>
-      </form>
+      <dialog id="new-kanji-dialog">
+        <form id="admin-new-kanji-form" class="admin-new-form">
+          <h2>漢字マスタの新規追加</h2>
+          <label>種別
+            ${entryTypeSelectHtml("kanji", "new-k-entry-type")}
+          </label>
+          <label>文字（1文字の漢字、熟語、四字熟語など）
+            <input type="text" id="new-k-character" required />
+          </label>
+          <label>級
+            <input type="number" id="new-k-level" required />
+          </label>
+          <label>音読み
+            <input type="text" id="new-k-on" />
+          </label>
+          <label>訓読み
+            <input type="text" id="new-k-kun" />
+          </label>
+          <label>部首
+            <input type="text" id="new-k-radical" />
+          </label>
+          <label>画数
+            <input type="number" id="new-k-stroke" />
+          </label>
+          <label>意味
+            <input type="text" id="new-k-meaning" />
+          </label>
+          <label>タグ（カンマ区切り、任意。新しいタグ名は自動作成されます）
+            <input type="text" id="new-k-tags" placeholder="例: 動物,水中生物" />
+          </label>
+          <div class="dialog-actions">
+            <button type="button" id="cancel-new-kanji">キャンセル</button>
+            <button type="submit" class="primary-btn">追加</button>
+          </div>
+        </form>
+      </dialog>
 
       <h2>タグ一覧</h2>
-      <table class="kanji-table admin-table" id="admin-tag-list-table">
-        <thead><tr><th>タグ名</th><th>使用件数</th><th></th></tr></thead>
-        <tbody>
-          ${allTags
-            .map(
-              (t) => `
-                <tr data-tag-id="${t.id}">
-                  <td>${escapeHtml(t.name)}</td>
-                  <td>${t.usage_count}</td>
-                  <td><button class="delete-tag-btn">削除</button></td>
-                </tr>
-              `
-            )
-            .join("")}
-        </tbody>
-      </table>
+      <div class="admin-table-wrapper admin-table-wrapper-small">
+        <table class="kanji-table admin-table" id="admin-tag-list-table">
+          <thead><tr><th>タグ名</th><th>使用件数</th><th></th></tr></thead>
+          <tbody>
+            ${allTags
+              .map(
+                (t) => `
+                  <tr data-tag-id="${t.id}">
+                    <td>${escapeHtml(t.name)}</td>
+                    <td>${t.usage_count}</td>
+                    <td><button class="delete-tag-btn">削除</button></td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
       <p id="admin-message" class="message"></p>
     </main>
   `;
@@ -891,6 +862,10 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
       }
     });
 
+    const dialog = document.querySelector<HTMLDialogElement>("#new-kanji-dialog");
+    document.querySelector("#open-new-kanji-dialog")?.addEventListener("click", () => dialog?.showModal());
+    document.querySelector("#cancel-new-kanji")?.addEventListener("click", () => dialog?.close());
+
     const newForm = document.querySelector<HTMLFormElement>("#admin-new-kanji-form");
     newForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -910,6 +885,7 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
       try {
         await apiFetch("/api/admin/kanji", { method: "POST", body: JSON.stringify(payload) });
         showMessage("追加しました。", true);
+        dialog?.close();
         render();
       } catch (err) {
         showMessage(`追加に失敗しました: ${(err as Error).message}`, false);
@@ -948,7 +924,6 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
         type: tr.querySelector<HTMLInputElement>(".f-type")!.value,
         prompt: tr.querySelector<HTMLInputElement>(".f-prompt")!.value,
         correct_answer: tr.querySelector<HTMLInputElement>(".f-correct")!.value,
-        choices: splitCsv(tr.querySelector<HTMLInputElement>(".f-choices")!.value),
         accepted_answers: splitCsv(tr.querySelector<HTMLInputElement>(".f-accepted")!.value),
       };
       try {
@@ -970,6 +945,10 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
     }
   });
 
+  const dialog = document.querySelector<HTMLDialogElement>("#new-question-dialog");
+  document.querySelector("#open-new-question-dialog")?.addEventListener("click", () => dialog?.showModal());
+  document.querySelector("#cancel-new-question")?.addEventListener("click", () => dialog?.close());
+
   const newForm = document.querySelector<HTMLFormElement>("#admin-new-question-form");
   newForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -978,12 +957,12 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
       type: document.querySelector<HTMLInputElement>("#new-q-type")!.value,
       prompt: document.querySelector<HTMLInputElement>("#new-q-prompt")!.value,
       correct_answer: document.querySelector<HTMLInputElement>("#new-q-correct")!.value,
-      choices: splitCsv(document.querySelector<HTMLInputElement>("#new-q-choices")!.value),
       accepted_answers: splitCsv(document.querySelector<HTMLInputElement>("#new-q-accepted")!.value),
     };
     try {
       await apiFetch("/api/admin/questions", { method: "POST", body: JSON.stringify(payload) });
       showMessage("追加しました。", true);
+      dialog?.close();
       render();
     } catch (err) {
       showMessage(`追加に失敗しました: ${(err as Error).message}`, false);
@@ -1004,25 +983,15 @@ async function render(): Promise<void> {
   }
 
   if (path === "/challenge") {
+    const spiceParam = params.get("spice");
+    const spice: SpiceLevel = SPICE_ORDER.includes(spiceParam as SpiceLevel) ? (spiceParam as SpiceLevel) : "medium";
     const filter: ChallengeFilter = {
-      levels: params.get("levels") || "",
-      tagIds: params.get("tagIds") || "",
-      difficultyMin: params.get("difficultyMin") || "1",
-      difficultyMax: params.get("difficultyMax") || "10",
-      mode: params.get("mode") === "input" ? "input" : "choice",
+      tags: params.get("tags") || "",
+      spice,
     };
     app.innerHTML = await renderChallenge(filter);
     attachHeaderEvents();
     attachChallengeEvents(filter);
-    return;
-  }
-
-  if (path === "/study") {
-    const level = params.get("level") || "10";
-    const q = params.get("q") || "";
-    app.innerHTML = await renderStudy(level, q);
-    attachHeaderEvents();
-    attachStudyEvents();
     return;
   }
 

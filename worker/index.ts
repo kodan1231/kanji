@@ -3,14 +3,6 @@ export interface Env {
   ASSETS: Fetcher;
 }
 
-interface QuestionRow {
-  id: number;
-  kanji_id: number;
-  type: string;
-  prompt: string;
-  choices: string | null;
-}
-
 interface SessionUser {
   id: number;
   username: string;
@@ -25,9 +17,16 @@ interface TagRef {
 const SESSION_COOKIE = "session_token";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // 30日
 
-// 全ユーザー正答率から内部難易度(1〜10)を算出する式。
-// 回答実績がまだない問題は正答率0.5(中間)とみなす。
-// 正答率が高いほど難易度は低く(易しく)、正答率が低いほど難易度は高く(難しく)なる。
+// スパイス難易度 → 正答率レンジ（意図的に隣接帯とオーバーラップさせている）
+const SPICE_RANGES: Record<string, [number, number]> = {
+  mild: [0.65, 1.01],
+  medium: [0.5, 0.8],
+  hot: [0.35, 0.65],
+  veryhot: [0.2, 0.5],
+  extreme: [0, 0.35],
+};
+
+// 参考表示用：全体正答率から内部難易度(1〜10)を算出する式。回答実績がない問題は正答率0.5とみなす。
 const DIFFICULTY_EXPR =
   "(10 - MIN(9, CAST(COALESCE((SELECT AVG(a.is_correct) FROM attempts a WHERE a.question_id = q.id), 0.5) * 10 AS INTEGER)))";
 
@@ -123,6 +122,16 @@ async function resolveTagIds(env: Env, tagNames: string[]): Promise<number[]> {
   return ids;
 }
 
+async function lookupTagIdsByName(env: Env, tagNames: string[]): Promise<number[]> {
+  if (tagNames.length === 0) return [];
+  const placeholders = tagNames.map(() => "?").join(",");
+  const { results } = await env.DB
+    .prepare(`SELECT id FROM tags WHERE name IN (${placeholders})`)
+    .bind(...tagNames)
+    .all<{ id: number }>();
+  return results.map((r) => r.id);
+}
+
 async function setKanjiTags(env: Env, kanjiId: number, tagIds: number[]): Promise<void> {
   await env.DB.prepare("DELETE FROM kanji_tags WHERE kanji_id = ?").bind(kanjiId).run();
   for (const tagId of tagIds) {
@@ -178,7 +187,6 @@ interface AdminQuestionInput {
   type?: string;
   prompt?: string;
   correct_answer?: string;
-  choices?: string[] | null;
   accepted_answers?: string[] | null;
 }
 
@@ -203,29 +211,29 @@ export default {
     }
 
     if (pathname === "/api/questions/challenge") {
-      const levelsParam = url.searchParams.get("levels") || url.searchParams.get("level");
-      const tagsParam = url.searchParams.get("tagIds");
-      const difficultyMinParam = url.searchParams.get("difficultyMin");
-      const difficultyMaxParam = url.searchParams.get("difficultyMax");
+      const spiceParam = url.searchParams.get("spice") || "medium";
+      const range = SPICE_RANGES[spiceParam] || SPICE_RANGES.medium;
 
-      const levels = levelsParam
-        ? levelsParam
-            .split(",")
-            .map((s) => Number(s.trim()))
-            .filter((n) => !isNaN(n))
-        : [];
-      const tagIds = tagsParam
+      const tagsParam = url.searchParams.get("tags");
+      const tagNames = tagsParam
         ? tagsParam
             .split(",")
-            .map((s) => Number(s.trim()))
-            .filter((n) => !isNaN(n))
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
         : [];
-      const minD = difficultyMinParam ? Number(difficultyMinParam) : 1;
-      const maxD = difficultyMaxParam ? Number(difficultyMaxParam) : 10;
+
+      let tagIds: number[] = [];
+      if (tagNames.length > 0) {
+        tagIds = await lookupTagIdsByName(env, tagNames);
+        if (tagIds.length === 0) {
+          // 指定されたタグが1つも存在しない場合は該当なしとする
+          return jsonResponse({ questions: [] });
+        }
+      }
 
       let innerQuery = `
-        SELECT DISTINCT q.id, q.kanji_id, q.type, q.prompt, q.choices, k.level,
-          ${DIFFICULTY_EXPR} AS difficulty
+        SELECT DISTINCT q.id, q.kanji_id, q.type, q.prompt,
+          COALESCE((SELECT AVG(a.is_correct) FROM attempts a WHERE a.question_id = q.id), 0.5) AS accuracy
         FROM questions q
         JOIN kanji k ON q.kanji_id = k.id
       `;
@@ -237,55 +245,26 @@ export default {
         params.push(...tagIds);
       }
 
-      innerQuery += " WHERE 1=1";
-      if (levels.length > 0) {
-        const placeholders = levels.map(() => "?").join(",");
-        innerQuery += ` AND k.level IN (${placeholders})`;
-        params.push(...levels);
-      }
-
       const outerQuery = `
         SELECT * FROM (${innerQuery}) sub
-        WHERE difficulty BETWEEN ? AND ?
+        WHERE accuracy BETWEEN ? AND ?
         ORDER BY RANDOM()
         LIMIT 10
       `;
-      params.push(minD, maxD);
+      params.push(range[0], range[1]);
 
       const { results } = await env.DB
         .prepare(outerQuery)
         .bind(...params)
-        .all<QuestionRow & { difficulty: number; level: number }>();
+        .all<{ id: number; kanji_id: number; type: string; prompt: string; accuracy: number }>();
 
       const questions = results.map((row) => ({
         id: row.id,
         kanjiId: row.kanji_id,
         type: row.type,
         prompt: row.prompt,
-        choices: row.choices ? JSON.parse(row.choices) : null,
-        difficulty: row.difficulty,
       }));
       return jsonResponse({ questions });
-    }
-
-    if (pathname === "/api/kanji/study") {
-      const level = url.searchParams.get("level");
-      const q = url.searchParams.get("q");
-      let query =
-        "SELECT id, character, level, reading_on, reading_kun, radical, stroke_count, meaning FROM kanji WHERE 1=1";
-      const params: (string | number)[] = [];
-      if (level) {
-        query += " AND level = ?";
-        params.push(Number(level));
-      }
-      if (q) {
-        query += " AND (character LIKE ? OR reading_on LIKE ? OR reading_kun LIKE ?)";
-        const like = `%${q}%`;
-        params.push(like, like, like);
-      }
-      query += " ORDER BY id";
-      const { results } = await env.DB.prepare(query).bind(...params).all();
-      return jsonResponse({ kanji: results });
     }
 
     if (pathname === "/api/auth/register" && method === "POST") {
@@ -617,7 +596,7 @@ export default {
         const level = url.searchParams.get("level");
         const kanjiId = url.searchParams.get("kanjiId");
         let query = `
-          SELECT q.id, q.kanji_id, k.character, k.level, q.type, q.prompt, q.correct_answer, q.choices, q.accepted_answers,
+          SELECT q.id, q.kanji_id, k.character, k.level, q.type, q.prompt, q.correct_answer, q.accepted_answers,
             ${DIFFICULTY_EXPR} AS difficulty
           FROM questions q
           JOIN kanji k ON q.kanji_id = k.id
@@ -644,7 +623,6 @@ export default {
             type: string;
             prompt: string;
             correct_answer: string;
-            choices: string | null;
             accepted_answers: string | null;
             difficulty: number;
           }>();
@@ -657,7 +635,6 @@ export default {
           type: row.type,
           prompt: row.prompt,
           correctAnswer: row.correct_answer,
-          choices: row.choices ? JSON.parse(row.choices) : null,
           acceptedAnswers: row.accepted_answers ? JSON.parse(row.accepted_answers) : null,
           difficulty: row.difficulty,
         }));
@@ -674,15 +651,14 @@ export default {
         }
         const result = await env.DB
           .prepare(
-            `INSERT INTO questions (kanji_id, type, prompt, correct_answer, choices, accepted_answers)
-             VALUES (?, ?, ?, ?, ?, ?)`
+            `INSERT INTO questions (kanji_id, type, prompt, correct_answer, accepted_answers)
+             VALUES (?, ?, ?, ?, ?)`
           )
           .bind(
             body.kanjiId,
             body.type,
             body.prompt,
             body.correct_answer,
-            body.choices ? JSON.stringify(body.choices) : null,
             body.accepted_answers ? JSON.stringify(body.accepted_answers) : null
           )
           .run();
@@ -700,14 +676,13 @@ export default {
           }
           await env.DB
             .prepare(
-              `UPDATE questions SET type = ?, prompt = ?, correct_answer = ?, choices = ?, accepted_answers = ?
+              `UPDATE questions SET type = ?, prompt = ?, correct_answer = ?, accepted_answers = ?
                WHERE id = ?`
             )
             .bind(
               body.type,
               body.prompt,
               body.correct_answer,
-              body.choices ? JSON.stringify(body.choices) : null,
               body.accepted_answers ? JSON.stringify(body.accepted_answers) : null,
               questionId
             )
