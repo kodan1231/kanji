@@ -244,17 +244,17 @@ async function renderHome(): Promise<string> {
     <main>
       <div class="kanji-cell">漢</div>
 
+      <h2>難易度</h2>
+      ${spiceSelectorHtml("medium")}
+
       <h2>タグ（カンマ区切り。未入力で全タグ対象）</h2>
       <div class="tag-input-wrapper">
         <input type="text" id="challenge-tags-input" placeholder="例: 動物, 数字" autocomplete="off" />
         <div class="tag-suggestions" id="challenge-tags-suggest"></div>
       </div>
 
-      <h2>難易度</h2>
-      ${spiceSelectorHtml("medium")}
-
       <div class="home-actions">
-        <button id="challenge-btn" class="primary-btn">チャレンジコースへ</button>
+        <button id="challenge-btn" class="primary-btn">開始</button>
       </div>
     </main>
   `;
@@ -444,7 +444,6 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
   return `
     ${renderHeader()}
     <main>
-      <h1>チャレンジコース</h1>
       <p class="progress">次の10問について、読み方をひらがなで入力してください。</p>
       <form id="challenge-form">
         ${questionsHtml}
@@ -507,6 +506,7 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
       challengeResults = results;
       challengeSubmitted = true;
       render();
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
     } catch (err) {
       submitBtn.disabled = false;
       feedback.classList.add("incorrect");
