@@ -19,11 +19,8 @@ interface ChallengeFilter {
 interface KanjiRow {
   id: number;
   character: string;
-  level: number;
   reading_on: string | null;
   reading_kun: string | null;
-  radical: string | null;
-  stroke_count: number | null;
   meaning: string | null;
 }
 
@@ -41,7 +38,6 @@ interface AdminQuestionRow {
   id: number;
   kanjiId: number;
   character: string;
-  level: number;
   type: string;
   prompt: string;
   correctAnswer: string;
@@ -517,14 +513,6 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
 
 // ---------- 管理画面 ----------
 
-function levelFilterOptions(current: string): string {
-  const levels = ["", "10", "9", "8"];
-  const labels: Record<string, string> = { "": "すべて", "10": "10級", "9": "9級", "8": "8級" };
-  return levels
-    .map((lv) => `<option value="${lv}" ${current === lv ? "selected" : ""}>${labels[lv]}</option>`)
-    .join("");
-}
-
 function entryTypeOptionsHtml(current: string): string {
   const types = [
     { value: "", label: "すべて" },
@@ -550,7 +538,7 @@ function entryTypeSelectHtml(current: string, cssClass: string): string {
   `;
 }
 
-async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagId: string): Promise<string> {
+async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Promise<string> {
   if (!currentUser) {
     return `
       ${renderHeader()}
@@ -579,9 +567,7 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
   `;
 
   if (tab === "questions") {
-    const params = new URLSearchParams();
-    if (level) params.set("level", level);
-    const data = await apiFetch(`/api/admin/questions?${params.toString()}`);
+    const data = await apiFetch(`/api/admin/questions`);
     const questions: AdminQuestionRow[] = data.questions;
 
     const rows = questions
@@ -589,7 +575,7 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
         (q) => `
           <tr data-id="${q.id}">
             <td>${q.id}</td>
-            <td>${escapeHtml(q.character)}（${q.level}級）</td>
+            <td>${escapeHtml(q.character)}</td>
             <td>${q.difficulty}</td>
             <td><input class="f-type" value="${escapeHtml(q.type)}" /></td>
             <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" /></td>
@@ -610,12 +596,6 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
         <h1>管理画面 — 問題</h1>
         ${tabNav}
         <div class="admin-toolbar">
-          <form id="admin-filter-form" class="study-form">
-            <label>級
-              <select id="admin-level-filter">${levelFilterOptions(level)}</select>
-            </label>
-            <button type="submit">絞り込み</button>
-          </form>
           <button id="open-new-question-dialog" class="primary-btn">＋ 新規追加</button>
         </div>
         <p>${questions.length}件</p>
@@ -662,7 +642,6 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
   const allTags: (TagRef & { usage_count: number })[] = tagsData.tags;
 
   const params = new URLSearchParams();
-  if (level) params.set("level", level);
   if (entryType) params.set("entryType", entryType);
   if (tagId) params.set("tagId", tagId);
   const data = await apiFetch(`/api/admin/kanji?${params.toString()}`);
@@ -680,11 +659,8 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
           <td>${k.id}</td>
           <td>${entryTypeSelectHtml(k.entry_type, "f-entry-type")}</td>
           <td><input class="f-character" value="${escapeHtml(k.character)}" /></td>
-          <td><input class="f-level" type="number" value="${k.level}" /></td>
           <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
           <td><input class="f-kun" value="${escapeHtml(k.reading_kun ?? "")}" /></td>
-          <td><input class="f-radical" value="${escapeHtml(k.radical ?? "")}" /></td>
-          <td><input class="f-stroke" type="number" value="${k.stroke_count ?? ""}" /></td>
           <td><input class="f-meaning" value="${escapeHtml(k.meaning ?? "")}" /></td>
           <td><input class="f-tags" value="${escapeHtml(k.tags.map((t) => t.name).join(","))}" placeholder="カンマ区切り" /></td>
           <td>
@@ -703,9 +679,6 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
       ${tabNav}
       <div class="admin-toolbar">
         <form id="admin-filter-form" class="study-form">
-          <label>級
-            <select id="admin-level-filter">${levelFilterOptions(level)}</select>
-          </label>
           <label>種別
             <select id="admin-entry-type-filter">${entryTypeOptionsHtml(entryType)}</select>
           </label>
@@ -720,7 +693,7 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
       <div class="admin-table-wrapper">
         <table class="kanji-table admin-table">
           <thead>
-            <tr><th>ID</th><th>種別</th><th>文字</th><th>級</th><th>音読み</th><th>訓読み</th><th>部首</th><th>画数</th><th>意味</th><th>タグ</th><th></th></tr>
+            <tr><th>ID</th><th>種別</th><th>文字</th><th>音読み</th><th>訓読み</th><th>意味</th><th>タグ</th><th></th></tr>
           </thead>
           <tbody id="admin-kanji-rows">${rows}</tbody>
         </table>
@@ -735,20 +708,11 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
           <label>文字（1文字の漢字、熟語、四字熟語など）
             <input type="text" id="new-k-character" required />
           </label>
-          <label>級
-            <input type="number" id="new-k-level" required />
-          </label>
           <label>音読み
             <input type="text" id="new-k-on" />
           </label>
           <label>訓読み
             <input type="text" id="new-k-kun" />
-          </label>
-          <label>部首
-            <input type="text" id="new-k-radical" />
-          </label>
-          <label>画数
-            <input type="number" id="new-k-stroke" />
           </label>
           <label>意味
             <input type="text" id="new-k-meaning" />
@@ -787,19 +751,16 @@ async function renderAdmin(tab: AdminTab, level: string, entryType: string, tagI
   `;
 }
 
-function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _tagId: string): void {
+function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string): void {
   if (!currentUser?.isAdmin) return;
 
   const filterForm = document.querySelector<HTMLFormElement>("#admin-filter-form");
   filterForm?.addEventListener("submit", (e) => {
     e.preventDefault();
-    const newLevel = document.querySelector<HTMLSelectElement>("#admin-level-filter")!.value;
     if (tab === "kanji") {
       const newEntryType = document.querySelector<HTMLSelectElement>("#admin-entry-type-filter")!.value;
       const newTagId = document.querySelector<HTMLSelectElement>("#admin-tag-filter")!.value;
-      navigate(`/admin?tab=kanji&level=${newLevel}&entryType=${newEntryType}&tagId=${newTagId}`);
-    } else {
-      navigate(`/admin?tab=questions&level=${newLevel}`);
+      navigate(`/admin?tab=kanji&entryType=${newEntryType}&tagId=${newTagId}`);
     }
   });
 
@@ -833,13 +794,8 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
         const payload = {
           entry_type: tr.querySelector<HTMLSelectElement>(".f-entry-type")!.value,
           character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
-          level: Number(tr.querySelector<HTMLInputElement>(".f-level")!.value),
           reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
           reading_kun: tr.querySelector<HTMLInputElement>(".f-kun")!.value || null,
-          radical: tr.querySelector<HTMLInputElement>(".f-radical")!.value || null,
-          stroke_count: tr.querySelector<HTMLInputElement>(".f-stroke")!.value
-            ? Number(tr.querySelector<HTMLInputElement>(".f-stroke")!.value)
-            : null,
           meaning: tr.querySelector<HTMLInputElement>(".f-meaning")!.value || null,
           tags: splitCsv(tr.querySelector<HTMLInputElement>(".f-tags")!.value) || [],
         };
@@ -872,13 +828,8 @@ function attachAdminEvents(tab: AdminTab, _level: string, _entryType: string, _t
       const payload = {
         entry_type: document.querySelector<HTMLSelectElement>(".new-k-entry-type")!.value,
         character: document.querySelector<HTMLInputElement>("#new-k-character")!.value,
-        level: Number(document.querySelector<HTMLInputElement>("#new-k-level")!.value),
         reading_on: document.querySelector<HTMLInputElement>("#new-k-on")!.value || null,
         reading_kun: document.querySelector<HTMLInputElement>("#new-k-kun")!.value || null,
-        radical: document.querySelector<HTMLInputElement>("#new-k-radical")!.value || null,
-        stroke_count: document.querySelector<HTMLInputElement>("#new-k-stroke")!.value
-          ? Number(document.querySelector<HTMLInputElement>("#new-k-stroke")!.value)
-          : null,
         meaning: document.querySelector<HTMLInputElement>("#new-k-meaning")!.value || null,
         tags: splitCsv(document.querySelector<HTMLInputElement>("#new-k-tags")!.value),
       };
@@ -997,12 +948,11 @@ async function render(): Promise<void> {
 
   if (path === "/admin") {
     const tab: AdminTab = params.get("tab") === "questions" ? "questions" : "kanji";
-    const level = params.get("level") || "";
     const entryType = params.get("entryType") || "";
     const tagId = params.get("tagId") || "";
-    app.innerHTML = await renderAdmin(tab, level, entryType, tagId);
+    app.innerHTML = await renderAdmin(tab, entryType, tagId);
     attachHeaderEvents();
-    attachAdminEvents(tab, level, entryType, tagId);
+    attachAdminEvents(tab, entryType, tagId);
     return;
   }
 

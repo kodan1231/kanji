@@ -172,12 +172,9 @@ async function getTagsForKanjiIds(env: Env, kanjiIds: number[]): Promise<Map<num
 
 interface AdminKanjiInput {
   character?: string;
-  level?: number;
   entry_type?: string;
   reading_on?: string | null;
   reading_kun?: string | null;
-  radical?: string | null;
-  stroke_count?: number | null;
   meaning?: string | null;
   tags?: string[] | null;
 }
@@ -454,13 +451,12 @@ export default {
       // ---- 漢字マスタ CRUD ----
 
       if (pathname === "/api/admin/kanji" && method === "GET") {
-        const level = url.searchParams.get("level");
         const q = url.searchParams.get("q");
         const entryType = url.searchParams.get("entryType");
         const tagId = url.searchParams.get("tagId");
 
         let query =
-          "SELECT DISTINCT k.id, k.character, k.level, k.entry_type, k.reading_on, k.reading_kun, k.radical, k.stroke_count, k.meaning FROM kanji k";
+          "SELECT DISTINCT k.id, k.character, k.entry_type, k.reading_on, k.reading_kun, k.meaning FROM kanji k";
         const params: (string | number)[] = [];
 
         if (tagId) {
@@ -469,10 +465,6 @@ export default {
         }
 
         query += " WHERE 1=1";
-        if (level) {
-          query += " AND k.level = ?";
-          params.push(Number(level));
-        }
         if (entryType) {
           query += " AND k.entry_type = ?";
           params.push(entryType);
@@ -482,7 +474,7 @@ export default {
           const like = `%${q}%`;
           params.push(like, like, like);
         }
-        query += " ORDER BY k.level, k.id";
+        query += " ORDER BY k.id";
 
         const { results } = await env.DB
           .prepare(query)
@@ -490,12 +482,9 @@ export default {
           .all<{
             id: number;
             character: string;
-            level: number;
             entry_type: string;
             reading_on: string | null;
             reading_kun: string | null;
-            radical: string | null;
-            stroke_count: number | null;
             meaning: string | null;
           }>();
 
@@ -512,22 +501,19 @@ export default {
 
       if (pathname === "/api/admin/kanji" && method === "POST") {
         const body = await request.json<AdminKanjiInput>();
-        if (!body.character || !body.level) {
-          return jsonResponse({ error: "character and level are required" }, { status: 400 });
+        if (!body.character) {
+          return jsonResponse({ error: "character is required" }, { status: 400 });
         }
         const result = await env.DB
           .prepare(
-            `INSERT INTO kanji (character, level, entry_type, reading_on, reading_kun, radical, stroke_count, meaning)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO kanji (character, entry_type, reading_on, reading_kun, meaning)
+             VALUES (?, ?, ?, ?, ?)`
           )
           .bind(
             body.character,
-            body.level,
             body.entry_type || "kanji",
             body.reading_on ?? null,
             body.reading_kun ?? null,
-            body.radical ?? null,
-            body.stroke_count ?? null,
             body.meaning ?? null
           )
           .run();
@@ -547,22 +533,19 @@ export default {
 
         if (method === "PUT") {
           const body = await request.json<AdminKanjiInput>();
-          if (!body.character || !body.level) {
-            return jsonResponse({ error: "character and level are required" }, { status: 400 });
+          if (!body.character) {
+            return jsonResponse({ error: "character is required" }, { status: 400 });
           }
           await env.DB
             .prepare(
-              `UPDATE kanji SET character = ?, level = ?, entry_type = ?, reading_on = ?, reading_kun = ?, radical = ?, stroke_count = ?, meaning = ?
+              `UPDATE kanji SET character = ?, entry_type = ?, reading_on = ?, reading_kun = ?, meaning = ?
                WHERE id = ?`
             )
             .bind(
               body.character,
-              body.level,
               body.entry_type || "kanji",
               body.reading_on ?? null,
               body.reading_kun ?? null,
-              body.radical ?? null,
-              body.stroke_count ?? null,
               body.meaning ?? null,
               kanjiId
             )
@@ -593,25 +576,20 @@ export default {
       // ---- 問題 CRUD ----
 
       if (pathname === "/api/admin/questions" && method === "GET") {
-        const level = url.searchParams.get("level");
         const kanjiId = url.searchParams.get("kanjiId");
         let query = `
-          SELECT q.id, q.kanji_id, k.character, k.level, q.type, q.prompt, q.correct_answer, q.accepted_answers,
+          SELECT q.id, q.kanji_id, k.character, q.type, q.prompt, q.correct_answer, q.accepted_answers,
             ${DIFFICULTY_EXPR} AS difficulty
           FROM questions q
           JOIN kanji k ON q.kanji_id = k.id
           WHERE 1=1
         `;
         const params: (string | number)[] = [];
-        if (level) {
-          query += " AND k.level = ?";
-          params.push(Number(level));
-        }
         if (kanjiId) {
           query += " AND q.kanji_id = ?";
           params.push(Number(kanjiId));
         }
-        query += " ORDER BY k.level, k.id, q.id";
+        query += " ORDER BY k.id, q.id";
         const { results } = await env.DB
           .prepare(query)
           .bind(...params)
@@ -619,7 +597,6 @@ export default {
             id: number;
             kanji_id: number;
             character: string;
-            level: number;
             type: string;
             prompt: string;
             correct_answer: string;
@@ -631,7 +608,6 @@ export default {
           id: row.id,
           kanjiId: row.kanji_id,
           character: row.character,
-          level: row.level,
           type: row.type,
           prompt: row.prompt,
           correctAnswer: row.correct_answer,
