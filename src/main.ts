@@ -42,7 +42,9 @@ interface AdminQuestionRow {
   prompt: string;
   correctAnswer: string;
   acceptedAnswers: string[] | null;
-  difficulty: number;
+  accuracy: number;
+  attempts: number;
+  spiceLevels: string[];
 }
 
 const SPICE_LABELS: Record<SpiceLevel, string> = {
@@ -596,12 +598,18 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Pro
     const questions: AdminQuestionRow[] = data.questions;
 
     const rows = questions
-      .map(
-        (q) => `
+      .map((q) => {
+        const spiceLabels = q.spiceLevels
+          .map((s) => SPICE_LABELS[s as SpiceLevel] ?? s)
+          .join("・");
+        const accuracyText =
+          q.attempts > 0 ? `${Math.round(q.accuracy * 100)}%（${q.attempts}回）` : `${Math.round(q.accuracy * 100)}%（実績なし）`;
+        return `
           <tr data-id="${q.id}">
             <td>${q.id}</td>
             <td>${escapeHtml(q.character)}</td>
-            <td>${q.difficulty}</td>
+            <td>${accuracyText}</td>
+            <td>${escapeHtml(spiceLabels)}</td>
             <td><input class="f-type" value="${escapeHtml(q.type)}" /></td>
             <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" /></td>
             <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" /></td>
@@ -611,8 +619,8 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Pro
               <button class="delete-question-btn">削除</button>
             </td>
           </tr>
-        `
-      )
+        `;
+      })
       .join("");
 
     return `
@@ -627,7 +635,7 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Pro
         <div class="admin-table-wrapper">
           <table class="kanji-table admin-table">
             <thead>
-              <tr><th>ID</th><th>漢字</th><th>難易度</th><th>種別</th><th>問題文</th><th>正解</th><th>許容する読み</th><th></th></tr>
+              <tr><th>ID</th><th>漢字</th><th>正答率</th><th>辛さ</th><th>種別</th><th>問題文</th><th>正解</th><th>許容する読み</th><th></th></tr>
             </thead>
             <tbody id="admin-question-rows">${rows}</tbody>
           </table>

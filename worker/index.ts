@@ -26,10 +26,6 @@ const SPICE_RANGES: Record<string, [number, number]> = {
   extreme: [0, 0.35],
 };
 
-// 参考表示用：全体正答率から内部難易度(1〜10)を算出する式。回答実績がない問題は正答率0.5とみなす。
-const DIFFICULTY_EXPR =
-  "(10 - MIN(9, CAST(COALESCE((SELECT AVG(a.is_correct) FROM attempts a WHERE a.question_id = q.id), 0.5) * 10 AS INTEGER)))";
-
 async function pbkdf2(password: string, salt: Uint8Array): Promise<ArrayBuffer> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -704,7 +700,8 @@ export default {
         const kanjiId = url.searchParams.get("kanjiId");
         let query = `
           SELECT q.id, q.kanji_id, k.character, q.type, q.prompt, q.correct_answer, q.accepted_answers,
-            ${DIFFICULTY_EXPR} AS difficulty
+            COALESCE((SELECT AVG(a.is_correct) FROM attempts a WHERE a.question_id = q.id), 0.5) AS accuracy,
+            (SELECT COUNT(*) FROM attempts a WHERE a.question_id = q.id) AS attempts
           FROM questions q
           JOIN kanji k ON q.kanji_id = k.id
           WHERE 1=1
@@ -726,19 +723,28 @@ export default {
             prompt: string;
             correct_answer: string;
             accepted_answers: string | null;
-            difficulty: number;
+            accuracy: number;
+            attempts: number;
           }>();
 
-        const questions = results.map((row) => ({
-          id: row.id,
-          kanjiId: row.kanji_id,
-          character: row.character,
-          type: row.type,
-          prompt: row.prompt,
-          correctAnswer: row.correct_answer,
-          acceptedAnswers: row.accepted_answers ? JSON.parse(row.accepted_answers) : null,
-          difficulty: row.difficulty,
-        }));
+        const questions = results.map((row) => {
+          const spiceLevels = Object.keys(SPICE_RANGES).filter((spice) => {
+            const [min, max] = SPICE_RANGES[spice];
+            return row.accuracy >= min && row.accuracy <= max;
+          });
+          return {
+            id: row.id,
+            kanjiId: row.kanji_id,
+            character: row.character,
+            type: row.type,
+            prompt: row.prompt,
+            correctAnswer: row.correct_answer,
+            acceptedAnswers: row.accepted_answers ? JSON.parse(row.accepted_answers) : null,
+            accuracy: row.accuracy,
+            attempts: row.attempts,
+            spiceLevels,
+          };
+        });
         return jsonResponse({ questions });
       }
 
