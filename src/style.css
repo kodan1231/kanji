@@ -609,3 +609,70 @@ dialog::backdrop {
     transition: none !important;
   }
 }
+
+/* ホーム画面：漢アイコンと正答率パネル */
+.home-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.home-hero .kanji-cell {
+  margin: 0;
+}
+
+.spice-stats {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 14px 18px;
+  min-width: 200px;
+}
+
+.spice-stats-title {
+  margin: 0 0 8px;
+  font-weight: 500;
+  color: var(--color-indigo);
+  font-size: 0.9rem;
+}
+
+.spice-stats ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.spice-stats li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 0.9rem;
+}
+
+.spice-stat-label {
+  font-weight: 500;
+}
+
+.spice-stat-label.spice-mild {
+  color: #e8a33d;
+}
+.spice-stat-label.spice-medium {
+  color: #d97b2b;
+}
+.spice-stat-label.spice-hot {
+  color: #c1272d;
+}
+.spice-stat-label.spice-veryhot {
+  color: #971b21;
+}
+.spice-stat-label.spice-extreme {
+  color: #5c0f13;
+}
+
+.spice-stat-value {
+  color: var(--color-ink);
+}

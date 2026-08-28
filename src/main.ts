@@ -235,10 +235,35 @@ function attachSpiceSelectorEvents(): void {
 async function renderHome(): Promise<string> {
   await ensureTagsCache();
 
+  let statsHtml = "";
+  if (currentUser) {
+    try {
+      const data = await apiFetch("/api/stats/by-spice");
+      const stats: { spice: SpiceLevel; accuracy: number | null; attempts: number }[] = data.stats;
+      const rows = SPICE_ORDER.map((level) => {
+        const s = stats.find((x) => x.spice === level);
+        const text =
+          s && s.attempts > 0 ? `${Math.round((s.accuracy ?? 0) * 100)}%（${s.attempts}問）` : "回答なし";
+        return `<li><span class="spice-stat-label spice-${level}">${SPICE_LABELS[level]}</span><span class="spice-stat-value">${text}</span></li>`;
+      }).join("");
+      statsHtml = `
+        <div class="spice-stats">
+          <p class="spice-stats-title">あなたの正答率</p>
+          <ul>${rows}</ul>
+        </div>
+      `;
+    } catch {
+      statsHtml = "";
+    }
+  }
+
   return `
     ${renderHeader()}
     <main>
-      <div class="kanji-cell">漢</div>
+      <div class="home-hero">
+        <div class="kanji-cell">漢</div>
+        ${statsHtml}
+      </div>
 
       <h2>難易度</h2>
       ${spiceSelectorHtml("medium")}

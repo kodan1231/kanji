@@ -494,6 +494,40 @@ export default {
       return jsonResponse({ stats });
     }
 
+    if (pathname === "/api/stats/by-spice") {
+      const user = await getSessionUser(request, env);
+      if (!user) {
+        return jsonResponse({ error: "login required" }, { status: 401 });
+      }
+
+      const results = [];
+      for (const spice of Object.keys(SPICE_RANGES)) {
+        const [min, max] = SPICE_RANGES[spice];
+        const row = await env.DB
+          .prepare(
+            `SELECT AVG(a.is_correct) AS accuracy, COUNT(*) AS attempts
+             FROM attempts a
+             JOIN questions q ON a.question_id = q.id
+             WHERE a.user_id = ?
+               AND (
+                 SELECT COALESCE(AVG(a2.is_correct), 0.5)
+                 FROM attempts a2
+                 WHERE a2.question_id = q.id
+               ) BETWEEN ? AND ?`
+          )
+          .bind(user.id, min, max)
+          .first<{ accuracy: number | null; attempts: number }>();
+
+        results.push({
+          spice,
+          accuracy: row?.accuracy ?? null,
+          attempts: row?.attempts ?? 0,
+        });
+      }
+
+      return jsonResponse({ stats: results });
+    }
+
     // ---------- 管理者専用API ----------
 
     if (pathname.startsWith("/api/admin/")) {
