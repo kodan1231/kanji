@@ -648,6 +648,20 @@ export default {
         return jsonResponse({ status: "ok", id: newId }, { status: 201 });
       }
 
+      const draftMatch = pathname.match(/^\/api\/admin\/kanji\/(\d+)\/draft-question$/);
+      if (draftMatch && method === "GET") {
+        const kanjiId = Number(draftMatch[1]);
+        const kanji = await env.DB
+          .prepare("SELECT character, reading_on, reading_kun FROM kanji WHERE id = ?")
+          .bind(kanjiId)
+          .first<{ character: string; reading_on: string | null; reading_kun: string | null }>();
+        if (!kanji) {
+          return jsonResponse({ error: "kanji not found" }, { status: 404 });
+        }
+        const draft = buildReadingQuestion(kanji.character, kanji.reading_on, kanji.reading_kun);
+        return jsonResponse({ draft });
+      }
+
       const kanjiIdMatch = pathname.match(/^\/api\/admin\/kanji\/(\d+)$/);
       if (kanjiIdMatch) {
         const kanjiId = Number(kanjiIdMatch[1]);

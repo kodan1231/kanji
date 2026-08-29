@@ -644,9 +644,14 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Pro
         <dialog id="new-question-dialog">
           <form id="admin-new-question-form" class="admin-new-form">
             <h2>問題の新規追加</h2>
-            <label>漢字ID（漢字マスタ一覧のIDを指定）
-              <input type="number" id="new-q-kanji-id" required />
+            <label>対象の漢字・熟語（文字や読みで検索）
+              <div class="tag-input-wrapper">
+                <input type="text" id="new-q-kanji-search" placeholder="例: 花" autocomplete="off" />
+                <div class="tag-suggestions" id="new-q-kanji-suggest"></div>
+              </div>
+              <input type="hidden" id="new-q-kanji-id" required />
             </label>
+            <p id="new-q-selected" class="message"></p>
             <label>種別（reading / writing / radical など）
               <input type="text" id="new-q-type" value="reading" required />
             </label>
@@ -930,14 +935,107 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string): v
   });
 
   const dialog = document.querySelector<HTMLDialogElement>("#new-question-dialog");
-  document.querySelector("#open-new-question-dialog")?.addEventListener("click", () => dialog?.showModal());
+  const kanjiSearchInput = document.querySelector<HTMLInputElement>("#new-q-kanji-search");
+  const kanjiSuggestBox = document.querySelector<HTMLDivElement>("#new-q-kanji-suggest");
+  const kanjiIdField = document.querySelector<HTMLInputElement>("#new-q-kanji-id");
+  const selectedLabel = document.querySelector<HTMLParagraphElement>("#new-q-selected");
+
+  const resetKanjiSearch = () => {
+    if (kanjiSearchInput) kanjiSearchInput.value = "";
+    if (kanjiIdField) kanjiIdField.value = "";
+    if (selectedLabel) {
+      selectedLabel.textContent = "";
+      selectedLabel.classList.remove("correct");
+    }
+    if (kanjiSuggestBox) {
+      kanjiSuggestBox.innerHTML = "";
+      kanjiSuggestBox.classList.remove("open");
+    }
+  };
+
+  document.querySelector("#open-new-question-dialog")?.addEventListener("click", () => {
+    resetKanjiSearch();
+    dialog?.showModal();
+  });
   document.querySelector("#cancel-new-question")?.addEventListener("click", () => dialog?.close());
+
+  kanjiSearchInput?.addEventListener("input", async () => {
+    const q = kanjiSearchInput.value.trim();
+    if (!kanjiSuggestBox) return;
+    if (!q) {
+      kanjiSuggestBox.innerHTML = "";
+      kanjiSuggestBox.classList.remove("open");
+      return;
+    }
+    try {
+      const data = await apiFetch(`/api/admin/kanji?q=${encodeURIComponent(q)}`);
+      const matches: AdminKanjiRow[] = data.kanji.slice(0, 8);
+      if (matches.length === 0) {
+        kanjiSuggestBox.innerHTML = "";
+        kanjiSuggestBox.classList.remove("open");
+        return;
+      }
+      kanjiSuggestBox.innerHTML = matches
+        .map(
+          (k) =>
+            `<div class="tag-suggestion" data-id="${k.id}" data-character="${escapeHtml(k.character)}" data-reading="${escapeHtml(k.reading_kun || k.reading_on || "")}">
+              ${escapeHtml(k.character)}（ID:${k.id}） ${escapeHtml(k.reading_kun || k.reading_on || "")}
+            </div>`
+        )
+        .join("");
+      kanjiSuggestBox.classList.add("open");
+    } catch {
+      // 検索エラーは無視（候補が出ないだけにする）
+    }
+  });
+
+  kanjiSearchInput?.addEventListener("blur", () => {
+    setTimeout(() => kanjiSuggestBox?.classList.remove("open"), 150);
+  });
+
+  kanjiSuggestBox?.addEventListener("mousedown", async (e) => {
+    const target = e.target as HTMLElement;
+    const item = target.closest<HTMLElement>(".tag-suggestion");
+    if (!item) return;
+    const id = item.dataset.id!;
+    const character = item.dataset.character || "";
+
+    if (kanjiIdField) kanjiIdField.value = id;
+    if (kanjiSearchInput) kanjiSearchInput.value = character;
+    kanjiSuggestBox.classList.remove("open");
+
+    if (selectedLabel) {
+      selectedLabel.classList.add("correct");
+      selectedLabel.textContent = `選択中: ${character}（ID: ${id}）。ドラフトを読み込んでいます...`;
+    }
+
+    try {
+      const draftData = await apiFetch(`/api/admin/kanji/${id}/draft-question`);
+      const draft = draftData.draft as { prompt: string; correctAnswer: string; acceptedAnswers: string[] } | null;
+      if (draft) {
+        document.querySelector<HTMLInputElement>("#new-q-prompt")!.value = draft.prompt;
+        document.querySelector<HTMLInputElement>("#new-q-correct")!.value = draft.correctAnswer;
+        document.querySelector<HTMLInputElement>("#new-q-accepted")!.value = draft.acceptedAnswers.join(",");
+        if (selectedLabel) selectedLabel.textContent = `選択中: ${character}（ID: ${id}）。ドラフトを自動入力しました（内容は編集できます）。`;
+      } else {
+        if (selectedLabel)
+          selectedLabel.textContent = `選択中: ${character}（ID: ${id}）。読みが未登録のためドラフトは作成できませんでした。手入力してください。`;
+      }
+    } catch (err) {
+      if (selectedLabel) selectedLabel.textContent = `選択中: ${character}（ID: ${id}）。ドラフト取得に失敗: ${(err as Error).message}`;
+    }
+  });
 
   const newForm = document.querySelector<HTMLFormElement>("#admin-new-question-form");
   newForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const kanjiIdValue = document.querySelector<HTMLInputElement>("#new-q-kanji-id")!.value;
+    if (!kanjiIdValue) {
+      showMessage("対象の漢字・熟語を候補から選択してください。", false);
+      return;
+    }
     const payload = {
-      kanjiId: Number(document.querySelector<HTMLInputElement>("#new-q-kanji-id")!.value),
+      kanjiId: Number(kanjiIdValue),
       type: document.querySelector<HTMLInputElement>("#new-q-type")!.value,
       prompt: document.querySelector<HTMLInputElement>("#new-q-prompt")!.value,
       correct_answer: document.querySelector<HTMLInputElement>("#new-q-correct")!.value,
