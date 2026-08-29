@@ -565,7 +565,7 @@ function entryTypeSelectHtml(current: string, cssClass: string): string {
   `;
 }
 
-async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Promise<string> {
+async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _draftKanjiId: string): Promise<string> {
   if (!currentUser) {
     return `
       ${renderHeader()}
@@ -694,7 +694,7 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Pro
     .map(
       (k) => `
         <tr data-id="${k.id}">
-          <td>${k.id}</td>
+          <td><a href="#/admin?tab=questions&draftKanjiId=${k.id}" title="この漢字の問題を新規追加">${k.id}</a></td>
           <td>${entryTypeSelectHtml(k.entry_type, "f-entry-type")}</td>
           <td><input class="f-character" value="${escapeHtml(k.character)}" /></td>
           <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
@@ -789,7 +789,7 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string): Pro
   `;
 }
 
-function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string): void {
+function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, draftKanjiId: string): void {
   if (!currentUser?.isAdmin) return;
 
   const filterForm = document.querySelector<HTMLFormElement>("#admin-filter-form");
@@ -1026,6 +1026,33 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string): v
     }
   });
 
+  if (draftKanjiId) {
+    (async () => {
+      resetKanjiSearch();
+      try {
+        const draftData = await apiFetch(`/api/admin/kanji/${draftKanjiId}/draft-question`);
+        const character = draftData.character as string;
+        const draft = draftData.draft as { prompt: string; correctAnswer: string; acceptedAnswers: string[] } | null;
+        if (kanjiIdField) kanjiIdField.value = draftKanjiId;
+        if (kanjiSearchInput) kanjiSearchInput.value = character;
+        if (draft) {
+          document.querySelector<HTMLInputElement>("#new-q-prompt")!.value = draft.prompt;
+          document.querySelector<HTMLInputElement>("#new-q-correct")!.value = draft.correctAnswer;
+          document.querySelector<HTMLInputElement>("#new-q-accepted")!.value = draft.acceptedAnswers.join(",");
+          if (selectedLabel) {
+            selectedLabel.classList.add("correct");
+            selectedLabel.textContent = `選択中: ${character}（ID: ${draftKanjiId}）。ドラフトを自動入力しました（内容は編集できます）。`;
+          }
+        } else if (selectedLabel) {
+          selectedLabel.textContent = `選択中: ${character}（ID: ${draftKanjiId}）。読みが未登録のためドラフトは作成できませんでした。手入力してください。`;
+        }
+        dialog?.showModal();
+      } catch (err) {
+        showMessage(`ドラフト取得に失敗しました: ${(err as Error).message}`, false);
+      }
+    })();
+  }
+
   const newForm = document.querySelector<HTMLFormElement>("#admin-new-question-form");
   newForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1081,9 +1108,10 @@ async function render(): Promise<void> {
     const tab: AdminTab = params.get("tab") === "questions" ? "questions" : "kanji";
     const entryType = params.get("entryType") || "";
     const tagId = params.get("tagId") || "";
-    app.innerHTML = await renderAdmin(tab, entryType, tagId);
+    const draftKanjiId = params.get("draftKanjiId") || "";
+    app.innerHTML = await renderAdmin(tab, entryType, tagId, draftKanjiId);
     attachHeaderEvents();
-    attachAdminEvents(tab, entryType, tagId);
+    attachAdminEvents(tab, entryType, tagId, draftKanjiId);
     return;
   }
 

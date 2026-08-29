@@ -659,7 +659,7 @@ export default {
           return jsonResponse({ error: "kanji not found" }, { status: 404 });
         }
         const draft = buildReadingQuestion(kanji.character, kanji.reading_on, kanji.reading_kun);
-        return jsonResponse({ draft });
+        return jsonResponse({ character: kanji.character, draft });
       }
 
       const kanjiIdMatch = pathname.match(/^\/api\/admin\/kanji\/(\d+)$/);
