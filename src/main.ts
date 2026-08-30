@@ -615,7 +615,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
             <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" /></td>
             <td><input class="f-accepted" value="${escapeHtml((q.acceptedAnswers || []).join(","))}" placeholder="カンマ区切り" /></td>
             <td>
-              <button class="save-question-btn">保存</button>
               <button class="delete-question-btn">削除</button>
             </td>
           </tr>
@@ -912,26 +911,37 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
   // tab === "questions"
   const tbody = document.querySelector<HTMLTableSectionElement>("#admin-question-rows");
 
+  const saveQuestionRow = async (tr: HTMLTableRowElement) => {
+    const id = tr.dataset.id;
+    const payload = {
+      type: tr.querySelector<HTMLInputElement>(".f-type")!.value,
+      prompt: tr.querySelector<HTMLInputElement>(".f-prompt")!.value,
+      correct_answer: tr.querySelector<HTMLInputElement>(".f-correct")!.value,
+      accepted_answers: splitCsv(tr.querySelector<HTMLInputElement>(".f-accepted")!.value),
+    };
+    try {
+      await apiFetch(`/api/admin/questions/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+      showMessage("自動保存しました。", true);
+    } catch (err) {
+      showMessage(`自動保存に失敗しました: ${(err as Error).message}`, false);
+    }
+  };
+
+  // 入力欄からフォーカスが外れたタイミング（change）で自動保存
+  tbody?.addEventListener("change", async (e) => {
+    const target = e.target as HTMLElement;
+    const tr = target.closest<HTMLTableRowElement>("tr");
+    if (!tr) return;
+    if (target.matches(".f-type, .f-prompt, .f-correct, .f-accepted")) {
+      await saveQuestionRow(tr);
+    }
+  });
+
   tbody?.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
     const tr = target.closest("tr");
     if (!tr) return;
     const id = tr.dataset.id;
-
-    if (target.classList.contains("save-question-btn")) {
-      const payload = {
-        type: tr.querySelector<HTMLInputElement>(".f-type")!.value,
-        prompt: tr.querySelector<HTMLInputElement>(".f-prompt")!.value,
-        correct_answer: tr.querySelector<HTMLInputElement>(".f-correct")!.value,
-        accepted_answers: splitCsv(tr.querySelector<HTMLInputElement>(".f-accepted")!.value),
-      };
-      try {
-        await apiFetch(`/api/admin/questions/${id}`, { method: "PUT", body: JSON.stringify(payload) });
-        showMessage("保存しました。", true);
-      } catch (err) {
-        showMessage(`保存に失敗しました: ${(err as Error).message}`, false);
-      }
-    }
 
     if (target.classList.contains("delete-question-btn")) {
       if (!confirm("この問題と、関連する回答履歴もすべて削除されます。よろしいですか？")) return;
