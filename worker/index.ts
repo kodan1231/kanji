@@ -119,7 +119,7 @@ function readingVariants(on: string | null, kun: string | null): string[] {
   const variants: string[] = [];
   if (kun) {
     for (const part of kun.split("・")) {
-      const base = part.split("(")[0].trim();
+      const base = kataToHira(part.split("(")[0].trim());
       if (base && !variants.includes(base)) variants.push(base);
     }
   }
@@ -134,7 +134,7 @@ function readingVariants(on: string | null, kun: string | null): string[] {
 
 function analyzeKun(kun: string | null): { base: string; okuri: string; full: string; hasOkuri: boolean } | null {
   if (!kun) return null;
-  const first = kun.split("・")[0];
+  const first = kataToHira(kun.split("・")[0]);
   const parenIndex = first.indexOf("(");
   if (parenIndex >= 0) {
     const base = first.slice(0, parenIndex);
@@ -424,7 +424,8 @@ export default {
         ? JSON.parse(question.accepted_answers)
         : [question.correct_answer];
 
-      const isCorrect = acceptedAnswers.includes(answer.trim());
+      const trimmedAnswer = answer.trim();
+      const isCorrect = trimmedAnswer === question.correct_answer || acceptedAnswers.includes(trimmedAnswer);
 
       await env.DB
         .prepare("INSERT INTO attempts (user_id, question_id, is_correct) VALUES (?, ?, ?)")
