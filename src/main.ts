@@ -702,7 +702,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
           <td><input class="f-meaning" value="${escapeHtml(k.meaning ?? "")}" /></td>
           <td><input class="f-tags" value="${escapeHtml(k.tags.map((t) => t.name).join(","))}" placeholder="カンマ区切り" /></td>
           <td>
-            <button class="save-kanji-btn">保存</button>
             <button class="delete-kanji-btn">削除</button>
           </td>
         </tr>
@@ -822,28 +821,39 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
   if (tab === "kanji") {
     const tbody = document.querySelector<HTMLTableSectionElement>("#admin-kanji-rows");
 
+    const saveKanjiRow = async (tr: HTMLTableRowElement) => {
+      const id = tr.dataset.id;
+      const payload = {
+        entry_type: tr.querySelector<HTMLSelectElement>(".f-entry-type")!.value,
+        character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
+        reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
+        reading_kun: tr.querySelector<HTMLInputElement>(".f-kun")!.value || null,
+        meaning: tr.querySelector<HTMLInputElement>(".f-meaning")!.value || null,
+        tags: splitCsv(tr.querySelector<HTMLInputElement>(".f-tags")!.value) || [],
+      };
+      try {
+        await apiFetch(`/api/admin/kanji/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        showMessage("自動保存しました。", true);
+      } catch (err) {
+        showMessage(`自動保存に失敗しました: ${(err as Error).message}`, false);
+      }
+    };
+
+    // 入力欄からフォーカスが外れたタイミング（change）で自動保存
+    tbody?.addEventListener("change", async (e) => {
+      const target = e.target as HTMLElement;
+      const tr = target.closest<HTMLTableRowElement>("tr");
+      if (!tr) return;
+      if (target.matches(".f-entry-type, .f-character, .f-on, .f-kun, .f-meaning, .f-tags")) {
+        await saveKanjiRow(tr);
+      }
+    });
+
     tbody?.addEventListener("click", async (e) => {
       const target = e.target as HTMLElement;
       const tr = target.closest("tr");
       if (!tr) return;
       const id = tr.dataset.id;
-
-      if (target.classList.contains("save-kanji-btn")) {
-        const payload = {
-          entry_type: tr.querySelector<HTMLSelectElement>(".f-entry-type")!.value,
-          character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
-          reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
-          reading_kun: tr.querySelector<HTMLInputElement>(".f-kun")!.value || null,
-          meaning: tr.querySelector<HTMLInputElement>(".f-meaning")!.value || null,
-          tags: splitCsv(tr.querySelector<HTMLInputElement>(".f-tags")!.value) || [],
-        };
-        try {
-          await apiFetch(`/api/admin/kanji/${id}`, { method: "PUT", body: JSON.stringify(payload) });
-          showMessage("保存しました。", true);
-        } catch (err) {
-          showMessage(`保存に失敗しました: ${(err as Error).message}`, false);
-        }
-      }
 
       if (target.classList.contains("delete-kanji-btn")) {
         if (!confirm("このエントリと、関連する問題・回答履歴もすべて削除されます。よろしいですか？")) return;
