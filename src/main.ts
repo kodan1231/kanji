@@ -459,6 +459,7 @@ async function renderChallenge(filter: ChallengeFilter): Promise<string> {
         <div class="question-block">
           <p class="prompt"><span class="q-number">${i + 1}.</span> <span class="q-kanji">${escapeHtml(displayText)}</span></p>
           <input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />
+          <span class="input-warning" id="answer-warning-${i}"></span>
         </div>
       `;
     })
@@ -495,6 +496,25 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
 
   const form = document.querySelector<HTMLFormElement>("#challenge-form");
   const feedback = document.querySelector<HTMLParagraphElement>("#challenge-feedback")!;
+
+  const HIRAGANA_ONLY = /^[ぁ-んー]*$/;
+
+  challengeQuestions.forEach((_, i) => {
+    const input = document.querySelector<HTMLInputElement>(`#answer-input-${i}`);
+    const warning = document.querySelector<HTMLSpanElement>(`#answer-warning-${i}`);
+    if (!input || !warning) return;
+    input.addEventListener("blur", () => {
+      const value = input.value.trim();
+      if (value && !HIRAGANA_ONLY.test(value)) {
+        warning.textContent = "ひらがなで入力してください";
+      } else {
+        warning.textContent = "";
+      }
+    });
+    input.addEventListener("input", () => {
+      if (warning.textContent) warning.textContent = "";
+    });
+  });
 
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();

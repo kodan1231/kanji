@@ -676,3 +676,12 @@ dialog::backdrop {
 .spice-stat-value {
   color: var(--color-ink);
 }
+
+/* 回答欄のひらがな以外の入力に対する警告 */
+.input-warning {
+  display: block;
+  color: var(--color-hanko);
+  font-size: 0.85rem;
+  margin-top: 4px;
+  min-height: 1.2em;
+}
