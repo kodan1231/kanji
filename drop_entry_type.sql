@@ -1,0 +1,1 @@
+ALTER TABLE kanji DROP COLUMN entry_type;

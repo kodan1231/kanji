@@ -248,7 +248,6 @@ async function getTagsForKanjiIds(env: Env, kanjiIds: number[]): Promise<Map<num
 
 interface AdminKanjiInput {
   character?: string;
-  entry_type?: string;
   reading_on?: string | null;
   reading_kun?: string | null;
   meaning?: string | null;
@@ -257,7 +256,6 @@ interface AdminKanjiInput {
 
 interface AdminQuestionInput {
   kanjiId?: number;
-  type?: string;
   prompt?: string;
   correct_answer?: string;
   accepted_answers?: string[] | null;
@@ -563,11 +561,10 @@ export default {
 
       if (pathname === "/api/admin/kanji" && method === "GET") {
         const q = url.searchParams.get("q");
-        const entryType = url.searchParams.get("entryType");
         const tagId = url.searchParams.get("tagId");
 
         let query =
-          "SELECT DISTINCT k.id, k.character, k.entry_type, k.reading_on, k.reading_kun, k.meaning FROM kanji k";
+          "SELECT DISTINCT k.id, k.character, k.reading_on, k.reading_kun, k.meaning FROM kanji k";
         const params: (string | number)[] = [];
 
         if (tagId) {
@@ -576,10 +573,6 @@ export default {
         }
 
         query += " WHERE 1=1";
-        if (entryType) {
-          query += " AND k.entry_type = ?";
-          params.push(entryType);
-        }
         if (q) {
           query += " AND (k.character LIKE ? OR k.reading_on LIKE ? OR k.reading_kun LIKE ?)";
           const like = `%${q}%`;
@@ -593,7 +586,6 @@ export default {
           .all<{
             id: number;
             character: string;
-            entry_type: string;
             reading_on: string | null;
             reading_kun: string | null;
             meaning: string | null;
@@ -617,12 +609,11 @@ export default {
         }
         const result = await env.DB
           .prepare(
-            `INSERT INTO kanji (character, entry_type, reading_on, reading_kun, meaning)
-             VALUES (?, ?, ?, ?, ?)`
+            `INSERT INTO kanji (character, reading_on, reading_kun, meaning)
+             VALUES (?, ?, ?, ?)`
           )
           .bind(
             body.character,
-            body.entry_type || "kanji",
             body.reading_on ?? null,
             body.reading_kun ?? null,
             body.meaning ?? null
@@ -674,12 +665,11 @@ export default {
           }
           await env.DB
             .prepare(
-              `UPDATE kanji SET character = ?, entry_type = ?, reading_on = ?, reading_kun = ?, meaning = ?
+              `UPDATE kanji SET character = ?, reading_on = ?, reading_kun = ?, meaning = ?
                WHERE id = ?`
             )
             .bind(
               body.character,
-              body.entry_type || "kanji",
               body.reading_on ?? null,
               body.reading_kun ?? null,
               body.meaning ?? null,
@@ -765,20 +755,19 @@ export default {
 
       if (pathname === "/api/admin/questions" && method === "POST") {
         const body = await request.json<AdminQuestionInput>();
-        if (!body.kanjiId || !body.type || !body.prompt || !body.correct_answer) {
+        if (!body.kanjiId || !body.prompt || !body.correct_answer) {
           return jsonResponse(
-            { error: "kanjiId, type, prompt and correct_answer are required" },
+            { error: "kanjiId, prompt and correct_answer are required" },
             { status: 400 }
           );
         }
         const result = await env.DB
           .prepare(
             `INSERT INTO questions (kanji_id, type, prompt, correct_answer, accepted_answers)
-             VALUES (?, ?, ?, ?, ?)`
+             VALUES (?, 'reading', ?, ?, ?)`
           )
           .bind(
             body.kanjiId,
-            body.type,
             body.prompt,
             body.correct_answer,
             body.accepted_answers ? JSON.stringify(body.accepted_answers) : null
@@ -793,16 +782,15 @@ export default {
 
         if (method === "PUT") {
           const body = await request.json<AdminQuestionInput>();
-          if (!body.type || !body.prompt || !body.correct_answer) {
-            return jsonResponse({ error: "type, prompt and correct_answer are required" }, { status: 400 });
+          if (!body.prompt || !body.correct_answer) {
+            return jsonResponse({ error: "prompt and correct_answer are required" }, { status: 400 });
           }
           await env.DB
             .prepare(
-              `UPDATE questions SET type = ?, prompt = ?, correct_answer = ?, accepted_answers = ?
+              `UPDATE questions SET prompt = ?, correct_answer = ?, accepted_answers = ?
                WHERE id = ?`
             )
             .bind(
-              body.type,
               body.prompt,
               body.correct_answer,
               body.accepted_answers ? JSON.stringify(body.accepted_answers) : null,

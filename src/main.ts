@@ -30,7 +30,6 @@ interface TagRef {
 }
 
 interface AdminKanjiRow extends KanjiRow {
-  entry_type: string;
   tags: TagRef[];
 }
 
@@ -38,7 +37,6 @@ interface AdminQuestionRow {
   id: number;
   kanjiId: number;
   character: string;
-  type: string;
   prompt: string;
   correctAnswer: string;
   acceptedAnswers: string[] | null;
@@ -560,32 +558,7 @@ function attachChallengeEvents(filter: ChallengeFilter): void {
 
 // ---------- 管理画面 ----------
 
-function entryTypeOptionsHtml(current: string): string {
-  const types = [
-    { value: "", label: "すべて" },
-    { value: "kanji", label: "漢字" },
-    { value: "word", label: "熟語" },
-    { value: "yoji", label: "四字熟語" },
-  ];
-  return types
-    .map((t) => `<option value="${t.value}" ${current === t.value ? "selected" : ""}>${t.label}</option>`)
-    .join("");
-}
-
-function entryTypeSelectHtml(current: string, cssClass: string): string {
-  const types = [
-    { value: "kanji", label: "漢字" },
-    { value: "word", label: "熟語" },
-    { value: "yoji", label: "四字熟語" },
-  ];
-  return `
-    <select class="${cssClass}">
-      ${types.map((t) => `<option value="${t.value}" ${current === t.value ? "selected" : ""}>${t.label}</option>`).join("")}
-    </select>
-  `;
-}
-
-async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _draftKanjiId: string): Promise<string> {
+async function renderAdmin(tab: AdminTab, tagId: string, _draftKanjiId: string): Promise<string> {
   if (!currentUser) {
     return `
       ${renderHeader()}
@@ -630,7 +603,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
             <td>${escapeHtml(q.character)}</td>
             <td>${accuracyText}</td>
             <td>${escapeHtml(spiceLabels)}</td>
-            <td><input class="f-type" value="${escapeHtml(q.type)}" /></td>
             <td><input class="f-prompt" value="${escapeHtml(q.prompt)}" /></td>
             <td><input class="f-correct" value="${escapeHtml(q.correctAnswer)}" /></td>
             <td><input class="f-accepted" value="${escapeHtml((q.acceptedAnswers || []).join(","))}" placeholder="カンマ区切り" /></td>
@@ -654,7 +626,7 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
         <div class="admin-table-wrapper">
           <table class="kanji-table admin-table">
             <thead>
-              <tr><th>ID</th><th>漢字</th><th>正答率</th><th>辛さ</th><th>種別</th><th>問題文</th><th>正解</th><th>許容する読み</th><th></th></tr>
+              <tr><th>ID</th><th>漢字</th><th>正答率</th><th>辛さ</th><th>問題文</th><th>正解</th><th>許容する読み</th><th></th></tr>
             </thead>
             <tbody id="admin-question-rows">${rows}</tbody>
           </table>
@@ -671,9 +643,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
               <input type="hidden" id="new-q-kanji-id" required />
             </label>
             <p id="new-q-selected" class="message"></p>
-            <label>種別（reading / writing / radical など）
-              <input type="text" id="new-q-type" value="reading" required />
-            </label>
             <label>問題文
               <input type="text" id="new-q-prompt" required />
             </label>
@@ -699,7 +668,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
   const allTags: (TagRef & { usage_count: number })[] = tagsData.tags;
 
   const params = new URLSearchParams();
-  if (entryType) params.set("entryType", entryType);
   if (tagId) params.set("tagId", tagId);
   const data = await apiFetch(`/api/admin/kanji?${params.toString()}`);
   const kanjiList: AdminKanjiRow[] = data.kanji;
@@ -714,7 +682,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
       (k) => `
         <tr data-id="${k.id}">
           <td><a href="#/admin?tab=questions&draftKanjiId=${k.id}" title="この漢字の問題を新規追加">${k.id}</a></td>
-          <td>${entryTypeSelectHtml(k.entry_type, "f-entry-type")}</td>
           <td><input class="f-character" value="${escapeHtml(k.character)}" /></td>
           <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
           <td><input class="f-kun" value="${escapeHtml(k.reading_kun ?? "")}" /></td>
@@ -735,9 +702,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
       ${tabNav}
       <div class="admin-toolbar">
         <form id="admin-filter-form" class="study-form">
-          <label>種別
-            <select id="admin-entry-type-filter">${entryTypeOptionsHtml(entryType)}</select>
-          </label>
           <label>タグ
             <select id="admin-tag-filter">${tagFilterOptions}</select>
           </label>
@@ -749,7 +713,7 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
       <div class="admin-table-wrapper">
         <table class="kanji-table admin-table">
           <thead>
-            <tr><th>ID</th><th>種別</th><th>文字</th><th>音読み</th><th>訓読み</th><th>意味</th><th>タグ</th><th></th></tr>
+            <tr><th>ID</th><th>文字</th><th>音読み</th><th>訓読み</th><th>意味</th><th>タグ</th><th></th></tr>
           </thead>
           <tbody id="admin-kanji-rows">${rows}</tbody>
         </table>
@@ -758,9 +722,6 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
       <dialog id="new-kanji-dialog">
         <form id="admin-new-kanji-form" class="admin-new-form">
           <h2>漢字マスタの新規追加</h2>
-          <label>種別
-            ${entryTypeSelectHtml("kanji", "new-k-entry-type")}
-          </label>
           <label>文字（1文字の漢字、熟語、四字熟語など）
             <input type="text" id="new-k-character" required />
           </label>
@@ -807,16 +768,15 @@ async function renderAdmin(tab: AdminTab, entryType: string, tagId: string, _dra
   `;
 }
 
-function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, draftKanjiId: string): void {
+function attachAdminEvents(tab: AdminTab, _tagId: string, draftKanjiId: string): void {
   if (!currentUser?.isAdmin) return;
 
   const filterForm = document.querySelector<HTMLFormElement>("#admin-filter-form");
   filterForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     if (tab === "kanji") {
-      const newEntryType = document.querySelector<HTMLSelectElement>("#admin-entry-type-filter")!.value;
       const newTagId = document.querySelector<HTMLSelectElement>("#admin-tag-filter")!.value;
-      navigate(`/admin?tab=kanji&entryType=${newEntryType}&tagId=${newTagId}`);
+      navigate(`/admin?tab=kanji&tagId=${newTagId}`);
     }
   });
 
@@ -843,7 +803,6 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
     const saveKanjiRow = async (tr: HTMLTableRowElement) => {
       const id = tr.dataset.id;
       const payload = {
-        entry_type: tr.querySelector<HTMLSelectElement>(".f-entry-type")!.value,
         character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
         reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
         reading_kun: tr.querySelector<HTMLInputElement>(".f-kun")!.value || null,
@@ -863,7 +822,7 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
       const target = e.target as HTMLElement;
       const tr = target.closest<HTMLTableRowElement>("tr");
       if (!tr) return;
-      if (target.matches(".f-entry-type, .f-character, .f-on, .f-kun, .f-meaning, .f-tags")) {
+      if (target.matches(".f-character, .f-on, .f-kun, .f-meaning, .f-tags")) {
         await saveKanjiRow(tr);
       }
     });
@@ -893,7 +852,6 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
     newForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
       const payload = {
-        entry_type: document.querySelector<HTMLSelectElement>(".new-k-entry-type")!.value,
         character: document.querySelector<HTMLInputElement>("#new-k-character")!.value,
         reading_on: document.querySelector<HTMLInputElement>("#new-k-on")!.value || null,
         reading_kun: document.querySelector<HTMLInputElement>("#new-k-kun")!.value || null,
@@ -934,7 +892,6 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
   const saveQuestionRow = async (tr: HTMLTableRowElement) => {
     const id = tr.dataset.id;
     const payload = {
-      type: tr.querySelector<HTMLInputElement>(".f-type")!.value,
       prompt: tr.querySelector<HTMLInputElement>(".f-prompt")!.value,
       correct_answer: tr.querySelector<HTMLInputElement>(".f-correct")!.value,
       accepted_answers: splitCsv(tr.querySelector<HTMLInputElement>(".f-accepted")!.value),
@@ -952,7 +909,7 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
     const target = e.target as HTMLElement;
     const tr = target.closest<HTMLTableRowElement>("tr");
     if (!tr) return;
-    if (target.matches(".f-type, .f-prompt, .f-correct, .f-accepted")) {
+    if (target.matches(".f-prompt, .f-correct, .f-accepted")) {
       await saveQuestionRow(tr);
     }
   });
@@ -1103,7 +1060,6 @@ function attachAdminEvents(tab: AdminTab, _entryType: string, _tagId: string, dr
     }
     const payload = {
       kanjiId: Number(kanjiIdValue),
-      type: document.querySelector<HTMLInputElement>("#new-q-type")!.value,
       prompt: document.querySelector<HTMLInputElement>("#new-q-prompt")!.value,
       correct_answer: document.querySelector<HTMLInputElement>("#new-q-correct")!.value,
       accepted_answers: splitCsv(document.querySelector<HTMLInputElement>("#new-q-accepted")!.value),
@@ -1146,12 +1102,11 @@ async function render(): Promise<void> {
 
   if (path === "/admin") {
     const tab: AdminTab = params.get("tab") === "questions" ? "questions" : "kanji";
-    const entryType = params.get("entryType") || "";
     const tagId = params.get("tagId") || "";
     const draftKanjiId = params.get("draftKanjiId") || "";
-    app.innerHTML = await renderAdmin(tab, entryType, tagId, draftKanjiId);
+    app.innerHTML = await renderAdmin(tab, tagId, draftKanjiId);
     attachHeaderEvents();
-    attachAdminEvents(tab, entryType, tagId, draftKanjiId);
+    attachAdminEvents(tab, tagId, draftKanjiId);
     return;
   }
 
