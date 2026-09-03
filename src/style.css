@@ -685,3 +685,25 @@ dialog::backdrop {
   margin-top: 4px;
   min-height: 1.2em;
 }
+
+/* タグ候補チップ */
+.tag-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.tag-chip {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  color: var(--color-indigo);
+}
+
+.tag-chip:hover {
+  border-color: var(--color-indigo);
+  background: var(--color-bg);
+}

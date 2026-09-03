@@ -268,10 +268,13 @@ async function renderHome(): Promise<string> {
       <h2>難易度</h2>
       ${spiceSelectorHtml("medium")}
 
-      <h2>タグ（カンマ区切り。未入力で全タグ対象）</h2>
+      <h2>タグ（カンマ区切り。未入力で全タグ対象。指定すると難易度に関わらず全体から出題されます）</h2>
       <div class="tag-input-wrapper">
         <input type="text" id="challenge-tags-input" placeholder="例: 動物, 数字" autocomplete="off" />
         <div class="tag-suggestions" id="challenge-tags-suggest"></div>
+      </div>
+      <div class="tag-chip-list" id="home-tag-chips">
+        ${allTagsCache.map((t) => `<button type="button" class="tag-chip" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`).join("")}
       </div>
 
       <div class="home-actions">
@@ -281,9 +284,31 @@ async function renderHome(): Promise<string> {
   `;
 }
 
+function addTagToInput(input: HTMLInputElement, name: string): void {
+  const existing = input.value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (existing.includes(name)) {
+    input.focus();
+    return;
+  }
+  existing.push(name);
+  input.value = existing.join(", ") + ", ";
+  input.focus();
+}
+
 function attachHomeEvents(): void {
   setupTagAutocomplete("challenge-tags-input", "challenge-tags-suggest");
   attachSpiceSelectorEvents();
+
+  const tagsInput = document.querySelector<HTMLInputElement>("#challenge-tags-input");
+  document.querySelector("#home-tag-chips")?.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const name = target.dataset.name;
+    if (!name || !tagsInput) return;
+    addTagToInput(tagsInput, name);
+  });
 
   document.querySelector("#challenge-btn")?.addEventListener("click", () => {
     const tagsRaw = document.querySelector<HTMLInputElement>("#challenge-tags-input")!.value;

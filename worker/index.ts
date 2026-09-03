@@ -283,7 +283,6 @@ export default {
 
     if (pathname === "/api/questions/challenge") {
       const spiceParam = url.searchParams.get("spice") || "medium";
-      const range = SPICE_RANGES[spiceParam] || SPICE_RANGES.medium;
 
       const tagsParam = url.searchParams.get("tags");
       const tagNames = tagsParam
@@ -301,6 +300,9 @@ export default {
           return jsonResponse({ questions: [] });
         }
       }
+
+      // タグを指定した場合は、辛さの指定に関わらず全難易度から出題する
+      const range = tagIds.length > 0 ? [0, 1.01] : SPICE_RANGES[spiceParam] || SPICE_RANGES.medium;
 
       let innerQuery = `
         SELECT DISTINCT q.id, q.kanji_id, q.type, q.prompt,
