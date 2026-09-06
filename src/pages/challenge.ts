@@ -10,6 +10,16 @@ let challengeQuestions: ChallengeQuestion[] = [];
 let challengeSubmitted = false;
 let challengeResults: { correct: boolean; correctAnswer: string }[] = [];
 let lastChallengeQuery: string | null = null;
+let hintOutsideClickHandlerAttached = false;
+
+// 開いているヒントの外側をクリックしたら閉じる（document監視は初回のみ登録）
+function ensureHintOutsideClickHandler(): void {
+  if (hintOutsideClickHandlerAttached) return;
+  hintOutsideClickHandlerAttached = true;
+  document.addEventListener("click", () => {
+    document.querySelectorAll<HTMLButtonElement>(".hint-toggle.open").forEach((btn) => btn.classList.remove("open"));
+  });
+}
 
 function challengeQueryKey(filter: ChallengeFilter): string {
   return `${filter.tags}|${filter.spice}`;
@@ -90,9 +100,20 @@ export async function renderChallenge(filter: ChallengeFilter): Promise<string> 
   const questionsHtml = challengeQuestions
     .map((q, i) => {
       const displayText = extractDisplayText(q.prompt);
+      const hintHtml = q.hint
+        ? `
+          <button type="button" class="hint-toggle" aria-label="ヒントを見る">
+            ？
+            <span class="hint-bubble">${escapeHtml(q.hint)}</span>
+          </button>
+        `
+        : "";
       return `
         <div class="question-block">
-          <p class="prompt"><span class="q-number">${i + 1}.</span> <span class="q-kanji">${escapeHtml(displayText)}</span></p>
+          <div class="question-prompt-row">
+            <p class="prompt"><span class="q-number">${i + 1}.</span> <span class="q-kanji">${escapeHtml(displayText)}</span></p>
+            ${hintHtml}
+          </div>
           <input type="text" id="answer-input-${i}" class="challenge-answer-input" autocomplete="off" />
           <span class="input-warning" id="answer-warning-${i}"></span>
         </div>
@@ -132,6 +153,14 @@ export function attachChallengeEvents(filter: ChallengeFilter, rerender: () => v
 
   const form = document.querySelector<HTMLFormElement>("#challenge-form");
   const feedback = document.querySelector<HTMLParagraphElement>("#challenge-feedback")!;
+
+  ensureHintOutsideClickHandler();
+  document.querySelectorAll<HTMLButtonElement>(".hint-toggle").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      btn.classList.toggle("open");
+    });
+  });
 
   const HIRAGANA_ONLY = /^[ぁ-んー]*$/;
 

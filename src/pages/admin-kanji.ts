@@ -48,7 +48,7 @@ export async function renderAdminKanji(tagId: string): Promise<string> {
           <td><input class="f-character" value="${escapeHtml(k.character)}" /></td>
           <td><input class="f-on" value="${escapeHtml(k.reading_on ?? "")}" /></td>
           <td><input class="f-kun" value="${escapeHtml(k.reading_kun ?? "")}" /></td>
-          <td><input class="f-meaning" value="${escapeHtml(k.meaning ?? "")}" /></td>
+          <td><input class="f-hint" value="${escapeHtml(k.hint ?? "")}" /></td>
           <td><input class="f-tags" value="${escapeHtml(k.tags.map((t) => t.name).join(","))}" placeholder="カンマ区切り" /></td>
           <td>
             <button class="delete-kanji-btn">削除</button>
@@ -76,7 +76,7 @@ export async function renderAdminKanji(tagId: string): Promise<string> {
       <div class="admin-table-wrapper">
         <table class="kanji-table admin-table">
           <thead>
-            <tr><th>ID</th><th>文字</th><th>音読み</th><th>訓読み</th><th>意味</th><th>タグ</th><th></th></tr>
+            <tr><th>ID</th><th>文字</th><th>音読み</th><th>訓読み</th><th>ヒント</th><th>タグ</th><th></th></tr>
           </thead>
           <tbody id="admin-kanji-rows">${rows}</tbody>
         </table>
@@ -94,8 +94,8 @@ export async function renderAdminKanji(tagId: string): Promise<string> {
           <label>訓読み
             <input type="text" id="new-k-kun" />
           </label>
-          <label>意味
-            <input type="text" id="new-k-meaning" />
+          <label>ヒント（出題画面の「？」マークで表示されます）
+            <input type="text" id="new-k-hint" />
           </label>
           <label>タグ（カンマ区切り、任意。新しいタグ名は自動作成されます）
             <input type="text" id="new-k-tags" placeholder="例: 動物,水中生物" />
@@ -173,7 +173,7 @@ export function attachAdminKanjiEvents(
       character: tr.querySelector<HTMLInputElement>(".f-character")!.value,
       reading_on: tr.querySelector<HTMLInputElement>(".f-on")!.value || null,
       reading_kun: tr.querySelector<HTMLInputElement>(".f-kun")!.value || null,
-      meaning: tr.querySelector<HTMLInputElement>(".f-meaning")!.value || null,
+      hint: tr.querySelector<HTMLInputElement>(".f-hint")!.value || null,
       tags: splitCsv(tr.querySelector<HTMLInputElement>(".f-tags")!.value) || [],
     };
     try {
@@ -189,7 +189,7 @@ export function attachAdminKanjiEvents(
     const target = e.target as HTMLElement;
     const tr = target.closest<HTMLTableRowElement>("tr");
     if (!tr) return;
-    if (target.matches(".f-character, .f-on, .f-kun, .f-meaning, .f-tags")) {
+    if (target.matches(".f-character, .f-on, .f-kun, .f-hint, .f-tags")) {
       await saveKanjiRow(tr);
     }
   });
@@ -222,7 +222,7 @@ export function attachAdminKanjiEvents(
       character: document.querySelector<HTMLInputElement>("#new-k-character")!.value,
       reading_on: document.querySelector<HTMLInputElement>("#new-k-on")!.value || null,
       reading_kun: document.querySelector<HTMLInputElement>("#new-k-kun")!.value || null,
-      meaning: document.querySelector<HTMLInputElement>("#new-k-meaning")!.value || null,
+      hint: document.querySelector<HTMLInputElement>("#new-k-hint")!.value || null,
       tags: splitCsv(document.querySelector<HTMLInputElement>("#new-k-tags")!.value),
     };
     try {

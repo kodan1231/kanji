@@ -54,7 +54,7 @@ export async function handlePublicRoute(request: Request, env: Env, url: URL): P
     const range = tagIds.length > 0 ? [0, 1.01] : SPICE_RANGES[spiceParam] || SPICE_RANGES.medium;
 
     let innerQuery = `
-      SELECT DISTINCT q.id, q.kanji_id, q.type, q.prompt,
+      SELECT DISTINCT q.id, q.kanji_id, q.type, q.prompt, k.hint,
         COALESCE((SELECT AVG(a.is_correct) FROM attempts a WHERE a.question_id = q.id), 0.5) AS accuracy
       FROM questions q
       JOIN kanji k ON q.kanji_id = k.id
@@ -78,13 +78,14 @@ export async function handlePublicRoute(request: Request, env: Env, url: URL): P
     const { results } = await env.DB
       .prepare(outerQuery)
       .bind(...params)
-      .all<{ id: number; kanji_id: number; type: string; prompt: string; accuracy: number }>();
+      .all<{ id: number; kanji_id: number; type: string; prompt: string; hint: string | null; accuracy: number }>();
 
     const questions = results.map((row) => ({
       id: row.id,
       kanjiId: row.kanji_id,
       type: row.type,
       prompt: row.prompt,
+      hint: row.hint,
     }));
     return jsonResponse({ questions });
   }

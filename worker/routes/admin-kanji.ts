@@ -7,7 +7,7 @@ interface AdminKanjiInput {
   character?: string;
   reading_on?: string | null;
   reading_kun?: string | null;
-  meaning?: string | null;
+  hint?: string | null;
   tags?: string[] | null;
 }
 
@@ -45,7 +45,7 @@ export async function handleAdminKanjiRoute(request: Request, env: Env, url: URL
     const q = url.searchParams.get("q");
     const tagId = url.searchParams.get("tagId");
 
-    let query = "SELECT DISTINCT k.id, k.character, k.reading_on, k.reading_kun, k.meaning FROM kanji k";
+    let query = "SELECT DISTINCT k.id, k.character, k.reading_on, k.reading_kun, k.hint FROM kanji k";
     const params: (string | number)[] = [];
 
     if (tagId) {
@@ -69,7 +69,7 @@ export async function handleAdminKanjiRoute(request: Request, env: Env, url: URL
         character: string;
         reading_on: string | null;
         reading_kun: string | null;
-        meaning: string | null;
+        hint: string | null;
       }>();
 
     const ids = results.map((r) => r.id);
@@ -90,10 +90,10 @@ export async function handleAdminKanjiRoute(request: Request, env: Env, url: URL
     }
     const result = await env.DB
       .prepare(
-        `INSERT INTO kanji (character, reading_on, reading_kun, meaning)
+        `INSERT INTO kanji (character, reading_on, reading_kun, hint)
          VALUES (?, ?, ?, ?)`
       )
-      .bind(body.character, body.reading_on ?? null, body.reading_kun ?? null, body.meaning ?? null)
+      .bind(body.character, body.reading_on ?? null, body.reading_kun ?? null, body.hint ?? null)
       .run();
     const newId = Number(result.meta.last_row_id);
 
@@ -141,10 +141,10 @@ export async function handleAdminKanjiRoute(request: Request, env: Env, url: URL
       }
       await env.DB
         .prepare(
-          `UPDATE kanji SET character = ?, reading_on = ?, reading_kun = ?, meaning = ?
+          `UPDATE kanji SET character = ?, reading_on = ?, reading_kun = ?, hint = ?
            WHERE id = ?`
         )
-        .bind(body.character, body.reading_on ?? null, body.reading_kun ?? null, body.meaning ?? null, kanjiId)
+        .bind(body.character, body.reading_on ?? null, body.reading_kun ?? null, body.hint ?? null, kanjiId)
         .run();
 
       if (body.tags !== undefined) {

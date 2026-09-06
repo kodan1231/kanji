@@ -707,3 +707,66 @@ dialog::backdrop {
   border-color: var(--color-indigo);
   background: var(--color-bg);
 }
+
+/* ヒント（？）マーク */
+.question-prompt-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.question-prompt-row .prompt {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.hint-toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--color-indigo);
+  background: #fff;
+  color: var(--color-indigo);
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hint-toggle:hover {
+  background: var(--color-bg);
+}
+
+.hint-bubble {
+  display: none;
+  position: absolute;
+  top: 130%;
+  right: 0;
+  left: auto;
+  min-width: 160px;
+  max-width: 260px;
+  background: var(--color-indigo-dark);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 400;
+  text-align: left;
+  line-height: 1.5;
+  white-space: normal;
+  z-index: 10;
+  box-shadow: 0 4px 10px rgba(43, 43, 40, 0.2);
+}
+
+/* PC: ホバーでも表示。クリック/タップ時は.openクラスで開閉（外側クリックで閉じる） */
+.hint-toggle:hover .hint-bubble,
+.hint-toggle.open .hint-bubble {
+  display: block;
+}

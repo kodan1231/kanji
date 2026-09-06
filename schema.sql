@@ -21,7 +21,7 @@ CREATE TABLE kanji (
   character TEXT NOT NULL,
   reading_on TEXT,
   reading_kun TEXT,
-  meaning TEXT
+  hint TEXT -- 出題画面の「？」マークで表示するヒント文言
 );
 
 -- タグ

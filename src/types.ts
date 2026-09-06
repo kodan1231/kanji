@@ -7,6 +7,7 @@ export interface ChallengeQuestion {
   kanjiId: number;
   type: string;
   prompt: string;
+  hint: string | null;
 }
 
 export interface ChallengeFilter {
@@ -19,7 +20,7 @@ export interface KanjiRow {
   character: string;
   reading_on: string | null;
   reading_kun: string | null;
-  meaning: string | null;
+  hint: string | null;
 }
 
 export interface TagRef {
