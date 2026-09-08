@@ -11,11 +11,11 @@ let allTagsCache: TagRef[] = [];
 // 選択中のタグ名（ホームを開くたびにリセット）
 let selectedTags = new Set<string>();
 
-// ホーム画面で最初に表示するタグチップの数（超過分は「すべて見る」で展開）
-// 小さい画面ではスクロールを避けるため少なめにする
-function initialTagChipCount(): number {
-  return window.innerWidth <= 430 ? 8 : 12;
-}
+// 折りたたみ時にランダム表示するタグ順（ホームを開くたびに再シャッフル）
+let shuffledTags: TagRef[] = [];
+
+// 折りたたみ時に表示するタグチップの数（超過分は「すべてのタグを見る」で展開）
+const COLLAPSED_TAG_CHIP_COUNT = 8;
 
 // Fisher-Yates。元配列は変更せずシャッフル済みの新配列を返す
 function shuffled<T>(items: T[]): T[] {
@@ -58,32 +58,34 @@ function tagChipHtml(t: TagRef): string {
   return `<button type="button" class="tag-chip${selected}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`;
 }
 
-// 初期表示: ランダムに一部だけ
-function partialTagChipsHtml(): string {
-  const picks = shuffled(allTagsCache).slice(0, initialTagChipCount());
+// タグチップ表示。expanded=false: ランダムに一部だけ / true: 全件をグループ分け＋ソート
+function tagChipsHtml(expanded: boolean): string {
+  if (expanded) {
+    const groups = groupTags(allTagsCache)
+      .map(
+        (g) => `
+        <div class="tag-group">
+          <p class="tag-group-label">${escapeHtml(g.label)}</p>
+          <div class="tag-chip-list">${g.tags.map(tagChipHtml).join("")}</div>
+        </div>`
+      )
+      .join("");
+    return `
+      ${groups}
+      <button type="button" class="tag-chip-more" id="home-tag-toggle" data-expanded="1">とじる</button>
+    `;
+  }
+
+  const picks = shuffledTags.slice(0, COLLAPSED_TAG_CHIP_COUNT);
   const hasMore = allTagsCache.length > picks.length;
   return `
     <div class="tag-chip-list">${picks.map(tagChipHtml).join("")}</div>
     ${
       hasMore
-        ? `<button type="button" class="tag-chip-more" id="home-tag-more">すべてのタグを見る（${allTagsCache.length}件）</button>`
+        ? `<button type="button" class="tag-chip-more" id="home-tag-toggle" data-expanded="0">すべてのタグを見る（${allTagsCache.length}件）</button>`
         : ""
     }
   `;
-}
-
-// 全件表示: グループ分け＋ソート
-function groupedTagChipsHtml(): string {
-  return groupTags(allTagsCache)
-    .map(
-      (g) => `
-        <div class="tag-group">
-          <p class="tag-group-label">${escapeHtml(g.label)}</p>
-          <div class="tag-chip-list">${g.tags.map(tagChipHtml).join("")}</div>
-        </div>
-      `
-    )
-    .join("");
 }
 
 function spiceSelectorHtml(selected: SpiceLevel): string {
@@ -114,6 +116,7 @@ function attachSpiceSelectorEvents(): void {
 export async function renderHome(): Promise<string> {
   await ensureTagsCache();
   selectedTags = new Set();
+  shuffledTags = shuffled(allTagsCache);
 
   let statsHtml = "";
   if (currentUser) {
@@ -150,7 +153,7 @@ export async function renderHome(): Promise<string> {
 
       <h2>タグ</h2>
       <div id="home-tag-chips">
-        ${partialTagChipsHtml()}
+        ${tagChipsHtml(false)}
       </div>
 
       <div class="home-actions">
@@ -167,9 +170,10 @@ export function attachHomeEvents(): void {
   chipContainer?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
 
-    // 「すべてのタグを見る」→ グループ分け表示に差し替え
-    if (target.id === "home-tag-more") {
-      chipContainer.innerHTML = groupedTagChipsHtml();
+    // 「すべてのタグを見る」/「とじる」→ 折りたたみ表示とグループ分け表示を切り替え
+    if (target.id === "home-tag-toggle") {
+      const expanded = target.dataset.expanded === "1";
+      chipContainer.innerHTML = tagChipsHtml(!expanded);
       return;
     }
 
