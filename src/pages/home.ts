@@ -8,6 +8,22 @@ import type { SpiceLevel, TagRef } from "../types";
 // このページでのみ使うタグ一覧キャッシュ
 let allTagsCache: TagRef[] = [];
 
+// 選択中のタグ名（ホームを開くたびにリセット）
+let selectedTags = new Set<string>();
+
+// ホーム画面で最初に表示するタグチップの数（超過分は「すべて見る」で展開）
+const HOME_TAG_CHIP_COUNT = 12;
+
+// Fisher-Yates。元配列は変更せずシャッフル済みの新配列を返す
+function shuffled<T>(items: T[]): T[] {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 async function ensureTagsCache(): Promise<TagRef[]> {
   if (allTagsCache.length === 0) {
     const data = await apiFetch("/api/tags");
@@ -16,53 +32,55 @@ async function ensureTagsCache(): Promise<TagRef[]> {
   return allTagsCache;
 }
 
-function setupTagAutocomplete(inputId: string, suggestBoxId: string): void {
-  const input = document.querySelector<HTMLInputElement>(`#${inputId}`);
-  const box = document.querySelector<HTMLDivElement>(`#${suggestBoxId}`);
-  if (!input || !box) return;
+const DAY_TAG_RE = /^(\d+)日目$/;
 
-  const renderSuggestions = () => {
-    const value = input.value;
-    const lastCommaIndex = value.lastIndexOf(",");
-    const currentSegment = value.slice(lastCommaIndex + 1).trim();
+// タグをグループ分けし、各グループ内をソートして返す（全件表示用）
+function groupTags(tags: TagRef[]): { label: string; tags: TagRef[] }[] {
+  const days: TagRef[] = [];
+  const themes: TagRef[] = [];
+  for (const t of tags) {
+    (DAY_TAG_RE.test(t.name) ? days : themes).push(t);
+  }
+  themes.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  days.sort((a, b) => Number(a.name.match(DAY_TAG_RE)![1]) - Number(b.name.match(DAY_TAG_RE)![1]));
 
-    if (!currentSegment) {
-      box.innerHTML = "";
-      box.classList.remove("open");
-      return;
+  const groups: { label: string; tags: TagRef[] }[] = [];
+  if (themes.length > 0) groups.push({ label: "テーマ", tags: themes });
+  if (days.length > 0) groups.push({ label: "学習日", tags: days });
+  return groups;
+}
+
+function tagChipHtml(t: TagRef): string {
+  const selected = selectedTags.has(t.name) ? " selected" : "";
+  return `<button type="button" class="tag-chip${selected}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`;
+}
+
+// 初期表示: ランダムに一部だけ
+function partialTagChipsHtml(): string {
+  const picks = shuffled(allTagsCache).slice(0, HOME_TAG_CHIP_COUNT);
+  const hasMore = allTagsCache.length > picks.length;
+  return `
+    <div class="tag-chip-list">${picks.map(tagChipHtml).join("")}</div>
+    ${
+      hasMore
+        ? `<button type="button" class="tag-chip-more" id="home-tag-more">すべてのタグを見る（${allTagsCache.length}件）</button>`
+        : ""
     }
+  `;
+}
 
-    const matches = allTagsCache.filter((t) => t.name.includes(currentSegment)).slice(0, 8);
-
-    if (matches.length === 0) {
-      box.innerHTML = "";
-      box.classList.remove("open");
-      return;
-    }
-
-    box.innerHTML = matches
-      .map((t) => `<div class="tag-suggestion" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</div>`)
-      .join("");
-    box.classList.add("open");
-  };
-
-  input.addEventListener("input", renderSuggestions);
-  input.addEventListener("focus", renderSuggestions);
-  input.addEventListener("blur", () => {
-    setTimeout(() => box.classList.remove("open"), 150);
-  });
-
-  box.addEventListener("mousedown", (e) => {
-    const target = e.target as HTMLElement;
-    const name = target.dataset.name;
-    if (!name) return;
-    const value = input.value;
-    const lastCommaIndex = value.lastIndexOf(",");
-    const prefix = lastCommaIndex >= 0 ? value.slice(0, lastCommaIndex + 1) + " " : "";
-    input.value = `${prefix}${name}, `;
-    box.classList.remove("open");
-    input.focus();
-  });
+// 全件表示: グループ分け＋ソート
+function groupedTagChipsHtml(): string {
+  return groupTags(allTagsCache)
+    .map(
+      (g) => `
+        <div class="tag-group">
+          <p class="tag-group-label">${escapeHtml(g.label)}</p>
+          <div class="tag-chip-list">${g.tags.map(tagChipHtml).join("")}</div>
+        </div>
+      `
+    )
+    .join("");
 }
 
 function spiceSelectorHtml(selected: SpiceLevel): string {
@@ -92,6 +110,7 @@ function attachSpiceSelectorEvents(): void {
 
 export async function renderHome(): Promise<string> {
   await ensureTagsCache();
+  selectedTags = new Set();
 
   let statsHtml = "";
   if (currentUser) {
@@ -126,13 +145,9 @@ export async function renderHome(): Promise<string> {
       <h2>難易度</h2>
       ${spiceSelectorHtml("medium")}
 
-      <h2>タグ（カンマ区切り。未入力で全タグ対象。指定すると難易度に関わらず全体から出題されます）</h2>
-      <div class="tag-input-wrapper">
-        <input type="text" id="challenge-tags-input" placeholder="例: 動物, 数字" autocomplete="off" />
-        <div class="tag-suggestions" id="challenge-tags-suggest"></div>
-      </div>
-      <div class="tag-chip-list" id="home-tag-chips">
-        ${allTagsCache.map((t) => `<button type="button" class="tag-chip" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`).join("")}
+      <h2>タグ（選ばなければ全タグ対象。選ぶと難易度に関わらず全体から出題されます）</h2>
+      <div id="home-tag-chips">
+        ${partialTagChipsHtml()}
       </div>
 
       <div class="home-actions">
@@ -142,39 +157,34 @@ export async function renderHome(): Promise<string> {
   `;
 }
 
-function addTagToInput(input: HTMLInputElement, name: string): void {
-  const existing = input.value
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (existing.includes(name)) {
-    input.focus();
-    return;
-  }
-  existing.push(name);
-  input.value = existing.join(", ") + ", ";
-  input.focus();
-}
-
 export function attachHomeEvents(): void {
-  setupTagAutocomplete("challenge-tags-input", "challenge-tags-suggest");
   attachSpiceSelectorEvents();
 
-  const tagsInput = document.querySelector<HTMLInputElement>("#challenge-tags-input");
-  document.querySelector("#home-tag-chips")?.addEventListener("click", (e) => {
+  const chipContainer = document.querySelector<HTMLDivElement>("#home-tag-chips");
+  chipContainer?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
-    const name = target.dataset.name;
-    if (!name || !tagsInput) return;
-    addTagToInput(tagsInput, name);
+
+    // 「すべてのタグを見る」→ グループ分け表示に差し替え
+    if (target.id === "home-tag-more") {
+      chipContainer.innerHTML = groupedTagChipsHtml();
+      return;
+    }
+
+    const chip = target.closest<HTMLButtonElement>(".tag-chip");
+    if (!chip) return;
+    const name = chip.dataset.name;
+    if (!name) return;
+    if (selectedTags.has(name)) {
+      selectedTags.delete(name);
+      chip.classList.remove("selected");
+    } else {
+      selectedTags.add(name);
+      chip.classList.add("selected");
+    }
   });
 
   document.querySelector("#challenge-btn")?.addEventListener("click", () => {
-    const tagsRaw = document.querySelector<HTMLInputElement>("#challenge-tags-input")!.value;
-    const tags = tagsRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .join(",");
+    const tags = [...selectedTags].join(",");
     const spiceInput = document.querySelector<HTMLInputElement>('input[name="spice"]:checked');
     const spice = (spiceInput?.value as SpiceLevel) || "medium";
 

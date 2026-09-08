@@ -239,45 +239,6 @@ input[type="number"] {
   color: var(--color-hanko);
 }
 
-/* タグ入力＋サジェスト */
-.tag-input-wrapper {
-  position: relative;
-  max-width: 480px;
-  margin-bottom: 20px;
-}
-
-.tag-input-wrapper input {
-  max-width: none;
-}
-
-.tag-suggestions {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: #fff;
-  border: 1px solid var(--color-line);
-  border-top: none;
-  border-radius: 0 0 4px 4px;
-  z-index: 5;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.tag-suggestions.open {
-  display: block;
-}
-
-.tag-suggestion {
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.tag-suggestion:hover {
-  background: var(--color-bg);
-}
-
 /* スパイス難易度セレクター */
 .spice-selector {
   display: flex;
@@ -706,6 +667,35 @@ dialog::backdrop {
 .tag-chip:hover {
   border-color: var(--color-indigo);
   background: var(--color-bg);
+}
+
+.tag-chip.selected {
+  background: var(--color-indigo);
+  border-color: var(--color-indigo);
+  color: #fff;
+}
+
+/* タグのグループ（全件表示時） */
+.tag-group {
+  margin-bottom: 16px;
+}
+
+.tag-group-label {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-ink);
+  opacity: 0.6;
+}
+
+/* すべてのタグを見るボタン */
+.tag-chip-more {
+  background: transparent;
+  border: none;
+  padding: 6px 4px;
+  font-size: 0.85rem;
+  color: var(--color-indigo);
+  text-decoration: underline;
 }
 
 /* ヒント（？）マーク */
