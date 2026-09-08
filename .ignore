@@ -1,0 +1,7 @@
+# ripgrep / 検索ツール用の除外リスト（.gitignore と違い追跡済みファイルも対象外にできる）
+# 生成物・巨大な適用済みマイグレーションを全文検索から外し、トークン消費を抑える。
+
+db/migrations/applied/
+dist/
+package-lock.json
+.wrangler/
