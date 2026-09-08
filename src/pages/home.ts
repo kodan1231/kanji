@@ -145,7 +145,7 @@ export async function renderHome(): Promise<string> {
       <h2>難易度</h2>
       ${spiceSelectorHtml("medium")}
 
-      <h2>タグ（選ばなければ全タグ対象。選ぶと難易度に関わらず全体から出題されます）</h2>
+      <h2>タグ</h2>
       <div id="home-tag-chips">
         ${partialTagChipsHtml()}
       </div>
