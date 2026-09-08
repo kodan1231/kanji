@@ -760,3 +760,69 @@ dialog::backdrop {
 .hint-toggle.open .hint-bubble {
   display: block;
 }
+
+/* 小さい画面（iPhone SE など）：ホーム画面を1画面に収める */
+@media (max-width: 430px) {
+  #app {
+    padding: 0 14px 40px;
+  }
+
+  .app-header {
+    padding: 12px 0;
+    margin-bottom: 16px;
+  }
+
+  h2 {
+    margin: 14px 0 8px;
+    font-size: 1.05rem;
+  }
+
+  /* 「漢」アイコンと正答率パネルを横並びのまま維持（折り返さない） */
+  .home-hero {
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .home-hero .kanji-cell {
+    flex: none;
+    width: 72px;
+    height: 72px;
+    font-size: 2.4rem;
+    border-width: 2px;
+  }
+
+  .spice-stats {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+  }
+
+  .spice-stats-title {
+    margin-bottom: 4px;
+    font-size: 0.8rem;
+  }
+
+  .spice-stats li {
+    padding: 1px 0;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+
+  .spice-selector {
+    margin-bottom: 12px;
+  }
+
+  #home-tag-chips .tag-chip-list {
+    margin-bottom: 8px;
+  }
+
+  .home-actions {
+    margin-top: 14px;
+  }
+
+  .home-actions .primary-btn {
+    width: 100%;
+  }
+}

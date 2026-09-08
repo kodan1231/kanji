@@ -12,7 +12,10 @@ let allTagsCache: TagRef[] = [];
 let selectedTags = new Set<string>();
 
 // ホーム画面で最初に表示するタグチップの数（超過分は「すべて見る」で展開）
-const HOME_TAG_CHIP_COUNT = 12;
+// 小さい画面ではスクロールを避けるため少なめにする
+function initialTagChipCount(): number {
+  return window.innerWidth <= 430 ? 8 : 12;
+}
 
 // Fisher-Yates。元配列は変更せずシャッフル済みの新配列を返す
 function shuffled<T>(items: T[]): T[] {
@@ -57,7 +60,7 @@ function tagChipHtml(t: TagRef): string {
 
 // 初期表示: ランダムに一部だけ
 function partialTagChipsHtml(): string {
-  const picks = shuffled(allTagsCache).slice(0, HOME_TAG_CHIP_COUNT);
+  const picks = shuffled(allTagsCache).slice(0, initialTagChipCount());
   const hasMore = allTagsCache.length > picks.length;
   return `
     <div class="tag-chip-list">${picks.map(tagChipHtml).join("")}</div>
