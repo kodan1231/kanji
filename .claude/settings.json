@@ -1,5 +1,12 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(git --no-pager diff:*)",
+      "Bash(git --no-pager log:*)",
+      "Bash(git --no-pager show:*)",
+      "Bash(tasklist)",
+      "Bash(tasklist :*)"
+    ],
     "ask": [
       "Bash(git commit:*)"
     ]
